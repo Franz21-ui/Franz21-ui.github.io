@@ -421,7 +421,7 @@ window.FarmGod.Main = (function (Library, Translation) {
   // Waits for each farm to complete (farmBusy flag) before triggering the next.
   // Stops when no .farmGod_icon elements are left in the DOM.
   const autoSend = function () {
-    const getDelay = () => Math.floor(Math.random() * 400) + 300; // 300-700ms
+    const getDelay = () => Math.floor(Math.random() * 300) + 200; 
  
     const sendNext = function () {
       let $next = $('.farmGod_icon').first();
