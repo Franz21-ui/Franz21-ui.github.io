@@ -416,38 +416,141 @@ window.FarmGod.Main = (function (Library, Translation) {
   let curVillage = null;
   let farmBusy = false;
  
+  // ── STATE ──────────────────────────────────────────────────────────────────
+  let autoPaused = false;
+  let autoRestartTimer = null;
+  let countdownTimer = null;
+  let currentOptions = {};
+  let sessionStats = { sent: 0, errors: 0, runs: 0, villages: {} };
+  // ── END STATE ──────────────────────────────────────────────────────────────
+ 
   // ── AUTO-SEND ──────────────────────────────────────────────────────────────
-  // Sends all planned farms automatically one after another.
-  // Waits for each farm to complete (farmBusy flag) before triggering the next.
-  // Stops when no .farmGod_icon elements are left in the DOM.
-  const autoSend = function () {
-    const getDelay = () => Math.floor(Math.random() * 300) + 200; 
+  const autoSend = function (onComplete) {
+    const getDelay = () => Math.floor(Math.random() * 400) + 300; // 300-700ms
+ 
+    // Inject Pause/Resume button above the farm table
+    if ($('#farmGodPauseBtn').length === 0) {
+      $('#am_widget_Farm').first().before(
+        '<div id="farmGodControls" style="margin:5px 0;text-align:center;">' +
+        '<input type="button" id="farmGodPauseBtn" class="btn" value="Pause" ' +
+        'style="background:#c44;color:#fff;font-weight:bold;padding:4px 16px;">' +
+        '</div>'
+      );
+      $('#farmGodPauseBtn').on('click', function () {
+        autoPaused = !autoPaused;
+        $(this).val(autoPaused ? 'Weiter' : 'Pause');
+        $(this).css('background', autoPaused ? '#888' : '#c44');
+        if (!autoPaused) sendNext();
+      });
+    }
  
     const sendNext = function () {
+      if (autoPaused) return;
+ 
       let $next = $('.farmGod_icon').first();
  
       if ($next.length === 0) {
-        // All done
-        UI.SuccessMessage('FarmGod: Alle Farmen wurden versendet!');
+        // All done -- show stats and schedule restart
+        onComplete && onComplete();
         return;
       }
  
       if (farmBusy) {
-        // Wait until current send finishes, then retry
         setTimeout(sendNext, 100);
         return;
       }
  
       $next.trigger('click');
- 
-      // Schedule next farm after random delay
       setTimeout(sendNext, getDelay());
     };
  
-    // Small initial delay so the table is fully rendered before we start
     setTimeout(sendNext, 500);
   };
   // ── END AUTO-SEND ──────────────────────────────────────────────────────────
+ 
+  // ── STATS ──────────────────────────────────────────────────────────────────
+  const showStats = function (sent, errors, restartInSec) {
+    sessionStats.runs++;
+    let topVillages = Object.entries(sessionStats.villages)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => name + ': ' + count)
+      .join(' | ');
+ 
+    let statsHtml =
+      '<div id="farmGodStats" style="margin:8px auto;width:98%;background:#f4eed4;border:1px solid #7D510F;padding:6px;font-size:11px;text-align:center;">' +
+      '<b>Durchlauf ' + sessionStats.runs + ' abgeschlossen</b><br>' +
+      'Gesendet: <b>' + sent + '</b> &nbsp;|&nbsp; Fehler: <b>' + errors + '</b> &nbsp;|&nbsp; Gesamt Session: <b>' + sessionStats.sent + '</b><br>' +
+      (topVillages ? 'Top Doerfer: ' + topVillages + '<br>' : '') +
+      '<span id="farmGodCountdown" style="color:#7D510F;font-weight:bold;">Neustart in ' + restartInSec + 's</span>' +
+      '</div>';
+ 
+    $('.farmGodStats').remove();
+    $(statsHtml).addClass('farmGodStats').insertBefore('.farmGodContent');
+ 
+    // Countdown tick
+    let remaining = restartInSec;
+    countdownTimer = setInterval(function () {
+      remaining--;
+      $('#farmGodCountdown').text('Neustart in ' + remaining + 's');
+      if (remaining <= 0) clearInterval(countdownTimer);
+    }, 1000);
+  };
+  // ── END STATS ──────────────────────────────────────────────────────────────
+ 
+  // ── AUTO-RESTART ───────────────────────────────────────────────────────────
+  const scheduleRestart = function (minMin, minMax, runOptions) {
+    let delayMin = Math.floor(Math.random() * (minMax - minMin + 1) + minMin) * 60 * 1000;
+    autoRestartTimer = setTimeout(function () {
+      $('.farmGodStats').remove();
+      $('.farmGodContent').remove();
+      runFarmCycle(runOptions);
+    }, delayMin);
+  };
+  // ── END AUTO-RESTART ───────────────────────────────────────────────────────
+ 
+  // ── FARM CYCLE ─────────────────────────────────────────────────────────────
+  const runFarmCycle = function (opts) {
+    getData(opts.group, opts.newbarbs, opts.losses).then((data) => {
+      let plan = createPlanning(opts.distance, opts.time, opts.maxloot, data);
+      $('.farmGodContent').remove();
+      $('#am_widget_Farm').first().before(buildTable(plan.farms));
+ 
+      bindEventHandlers();
+      UI.InitProgressBars();
+      UI.updateProgressBar($('#FarmGodProgessbar'), 0, plan.counter);
+      $('#FarmGodProgessbar').data('current', 0).data('max', plan.counter);
+ 
+      let runSent = 0;
+      let runErrors = 0;
+ 
+      // Patch sendFarm to count stats per run
+      window._farmGodOnSuccess = function (villageName) {
+        runSent++;
+        sessionStats.sent++;
+        if (villageName) {
+          sessionStats.villages[villageName] = (sessionStats.villages[villageName] || 0) + 1;
+        }
+      };
+      window._farmGodOnError = function () {
+        runErrors++;
+      };
+ 
+      autoSend(function () {
+        // onComplete callback
+        let restartSec = Math.floor(
+          Math.random() * (opts.restartMax - opts.restartMin + 1) + opts.restartMin
+        ) * 60;
+ 
+        showStats(runSent, runErrors, restartSec);
+ 
+        if (opts.restartMin > 0) {
+          scheduleRestart(opts.restartMin, opts.restartMax, opts);
+        }
+      });
+    });
+  };
+  // ── END FARM CYCLE ─────────────────────────────────────────────────────────
  
   const init = function () {
     if (
@@ -461,65 +564,32 @@ window.FarmGod.Main = (function (Library, Translation) {
           $('.optionButton')
             .off('click')
             .on('click', () => {
-              let optionGroup = parseInt($('.optionGroup').val());
-              let optionDistance = parseFloat(
-                $('.optionDistance').val()
-              );
-              let optionTime = parseFloat($('.optionTime').val());
-              let optionLosses =
-                $('.optionLosses').prop('checked');
-              let optionMaxloot =
-                $('.optionMaxloot').prop('checked');
-              let optionNewbarbs =
-                $('.optionNewbarbs').prop('checked') || false;
+              // Clear any running timers from previous cycle
+              clearTimeout(autoRestartTimer);
+              clearInterval(countdownTimer);
+              autoPaused = false;
+              sessionStats = { sent: 0, errors: 0, runs: 0, villages: {} };
  
-              localStorage.setItem(
-                'farmGod_options',
-                JSON.stringify({
-                  optionGroup: optionGroup,
-                  optionDistance: optionDistance,
-                  optionTime: optionTime,
-                  optionLosses: optionLosses,
-                  optionMaxloot: optionMaxloot,
-                  optionNewbarbs: optionNewbarbs,
-                })
-              );
+              let opts = {
+                group:      parseInt($('.optionGroup').val()),
+                distance:   parseFloat($('.optionDistance').val()),
+                time:       parseFloat($('.optionTime').val()),
+                losses:     $('.optionLosses').prop('checked'),
+                maxloot:    $('.optionMaxloot').prop('checked'),
+                newbarbs:   $('.optionNewbarbs').prop('checked') || false,
+                restartMin: parseFloat($('.optionRestartMin').val()) || 0,
+                restartMax: parseFloat($('.optionRestartMax').val()) || 0,
+              };
  
-              $('.optionsContent').html(
-                UI.Throbber[0].outerHTML + '<br><br>'
-              );
-              getData(
-                optionGroup,
-                optionNewbarbs,
-                optionLosses
-              ).then((data) => {
-                Dialog.close();
+              // restartMax must be >= restartMin
+              if (opts.restartMax < opts.restartMin) opts.restartMax = opts.restartMin;
  
-                let plan = createPlanning(
-                  optionDistance,
-                  optionTime,
-                  optionMaxloot,
-                  data
-                );
-                $('.farmGodContent').remove();
-                $('#am_widget_Farm')
-                  .first()
-                  .before(buildTable(plan.farms));
+              localStorage.setItem('farmGod_options', JSON.stringify(opts));
  
-                bindEventHandlers();
-                UI.InitProgressBars();
-                UI.updateProgressBar(
-                  $('#FarmGodProgessbar'),
-                  0,
-                  plan.counter
-                );
-                $('#FarmGodProgessbar')
-                  .data('current', 0)
-                  .data('max', plan.counter);
+              $('.optionsContent').html(UI.Throbber[0].outerHTML + '<br><br>');
+              Dialog.close();
  
-                // ── Start auto-send after table is built ──
-                autoSend();
-              });
+              runFarmCycle(opts);
             });
  
           document.querySelector('.optionButton').focus();
@@ -565,13 +635,25 @@ window.FarmGod.Main = (function (Library, Translation) {
  
   const buildOptions = function () {
     let options = JSON.parse(localStorage.getItem('farmGod_options')) || {
-      optionGroup: 0,
-      optionDistance: 25,
-      optionTime: 10,
-      optionLosses: false,
-      optionMaxloot: true,
-      optionNewbarbs: true,
+      group: 0,
+      distance: 25,
+      time: 10,
+      losses: false,
+      maxloot: true,
+      newbarbs: true,
+      restartMin: 30,
+      restartMax: 45,
     };
+    // backwards compat with old key names
+    if (options.optionGroup !== undefined) {
+      options.group = options.optionGroup;
+      options.distance = options.optionDistance;
+      options.time = options.optionTime;
+      options.losses = options.optionLosses;
+      options.maxloot = options.optionMaxloot;
+      options.newbarbs = options.optionNewbarbs;
+    }
+ 
     let checkboxSettings = [false, true, true, true, false];
     let checkboxError = $('#plunder_list_filters')
       .find('input[type="checkbox"]')
@@ -587,7 +669,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       $templateRows.first().find('td').last().text().toNumber() >=
       $templateRows.last().find('td').last().text().toNumber();
  
-    return $.when(buildGroupSelect(options.optionGroup)).then(
+    return $.when(buildGroupSelect(options.group)).then(
       (groupSelect) => {
         return `<style>#popup_box_FarmGod{text-align:center;width:550px;}</style>
                 <h3>${t.options.title}</h3><br><div class="optionsContent">
@@ -597,26 +679,21 @@ window.FarmGod.Main = (function (Library, Translation) {
           }
                 <div style="width:90%;margin:auto;background: url(\'graphic/index/main_bg.jpg\') 100% 0% #E3D5B3;border: 1px solid #7D510F;border-collapse: separate !important;border-spacing: 0px !important;"><table class="vis" style="width:100%;text-align:left;font-size:11px;">
                   <tr><td>${t.options.group}</td><td>${groupSelect}</td></tr>
-                  <tr><td>${t.options.distance
-          }</td><td><input type="text" size="5" class="optionDistance" value="${options.optionDistance
-          }"></td></tr>
-                  <tr><td>${t.options.time
-          }</td><td><input type="text" size="5" class="optionTime" value="${options.optionTime
-          }"></td></tr>
-                  <tr><td>${t.options.losses
-          }</td><td><input type="checkbox" class="optionLosses" ${options.optionLosses ? 'checked' : ''
-          }></td></tr>
-                  <tr><td>${t.options.maxloot
-          }</td><td><input type="checkbox" class="optionMaxloot" ${options.optionMaxloot ? 'checked' : ''
-          }></td></tr>
+                  <tr><td>${t.options.distance}</td><td><input type="text" size="5" class="optionDistance" value="${options.distance}"></td></tr>
+                  <tr><td>${t.options.time}</td><td><input type="text" size="5" class="optionTime" value="${options.time}"></td></tr>
+                  <tr><td>${t.options.losses}</td><td><input type="checkbox" class="optionLosses" ${options.losses ? 'checked' : ''}></td></tr>
+                  <tr><td>${t.options.maxloot}</td><td><input type="checkbox" class="optionMaxloot" ${options.maxloot ? 'checked' : ''}></td></tr>
+                  <tr><td>Neustart nach (Min): Von</td><td>
+                    <input type="text" size="4" class="optionRestartMin" value="${options.restartMin || 30}">
+                    &nbsp;Bis&nbsp;
+                    <input type="text" size="4" class="optionRestartMax" value="${options.restartMax || 45}">
+                    &nbsp;<small>(0 = kein Neustart)</small>
+                  </td></tr>
                   ${game_data.market == 'nl'
-            ? `<tr><td>${t.options.newbarbs
-            }</td><td><input type="checkbox" class="optionNewbarbs" ${options.optionNewbarbs ? 'checked' : ''
-            }></td></tr>`
+            ? `<tr><td>${t.options.newbarbs}</td><td><input type="checkbox" class="optionNewbarbs" ${options.newbarbs ? 'checked' : ''}></td></tr>`
             : ''
           }
-                </table></div><br><input type="button" class="btn optionButton" value="${t.options.button
-          }"></div>`;
+                </table></div><br><input type="button" class="btn optionButton" value="${t.options.button}"></div>`;
       }
     );
   };
@@ -1065,6 +1142,8 @@ window.FarmGod.Main = (function (Library, Translation) {
             $pb.data('current'),
             $pb.data('max')
           );
+          let villageName = $this.closest('.farmRow').find('td').first().text().trim();
+          window._farmGodOnSuccess && window._farmGodOnSuccess(villageName);
           $this.closest('.farmRow').remove();
           farmBusy = false;
         },
@@ -1076,6 +1155,7 @@ window.FarmGod.Main = (function (Library, Translation) {
             $pb.data('current'),
             $pb.data('max')
           );
+          window._farmGodOnError && window._farmGodOnError();
           $this.closest('.farmRow').remove();
           farmBusy = false;
         }
