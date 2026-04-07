@@ -197,8 +197,9 @@
 
     // Schritt 1: Place-Screen des Herkunftsdorfes laden
     // URL: /game.php?village=ORIGIN&screen=place&target_x=X&target_y=Y
+    // x/y sind die korrekten Parameter fuer die Zielkoordinaten im Place-Screen
     let placeUrl = '/game.php?village=' + originId + '&screen=place'
-      + '&target_x=' + targetX + '&target_y=' + targetY + '&attack=true';
+      + '&x=' + targetX + '&y=' + targetY;
 
     setStatus('Lade...', 'pending', 'imminent');
 
@@ -273,9 +274,15 @@
         confirmForm.find('input').each(function () {
           let n = $(this).attr('name');
           let v = $(this).val();
-          if (n) confirmData[n] = v;
+          let t = $(this).attr('type');
+          // Alle inputs übernehmen außer Submit-Buttons die nicht attack sind
+          if (n && !(t === 'submit' && n !== 'attack')) {
+            confirmData[n] = v;
+          }
         });
-        confirmData['attack'] = 'true';
+        // Attack-Button explizit setzen
+        confirmData['attack'] = 'Angreifen';
+        console.log('[TWOps] Bestätigungsdaten:', confirmData);
 
         // Schritt 3: Bestätigung senden
         let sendUrl = '/game.php?village=' + originId + '&screen=place&try=confirm';
