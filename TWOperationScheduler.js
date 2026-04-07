@@ -115,18 +115,52 @@
   };
 
   // ── ORIGIN-ID ERMITTELN ────────────────────────────────────────────────────
+  // game_data.village ist ein Objekt {id, name, ...}, nicht direkt eine Zahl
+  // game_data.villages existiert nicht im Browser -- wir nutzen village_overview
   const getOriginId = function (op) {
     let parts = op.originCoord.replace(/[()]/g, '').split('|');
     let ox = parts[0].trim(), oy = parts[1].trim();
 
-    // Aus game_data.villages (Array eigener Doerfer)
-    if (Array.isArray(game_data.villages)) {
-      for (let v of game_data.villages) {
+    // Koordinaten des aktuellen Dorfes prüfen
+    let currentVillage = game_data.village;
+    if (currentVillage && String(currentVillage.x) === ox && String(currentVillage.y) === oy) {
+      return currentVillage.id;
+    }
+
+    // Alle eigenen Dörfer aus der Übersicht suchen (gecacht in window._twOpsVillages)
+    if (window._twOpsVillages) {
+      for (let v of window._twOpsVillages) {
         if (String(v.x) === ox && String(v.y) === oy) return v.id;
       }
     }
-    // Fallback: aktuelles Dorf
-    return game_data.village;
+
+    // Fallback: aktuelles Dorf-ID
+    return currentVillage ? currentVillage.id : game_data.village_id;
+  };
+
+  // Alle eigenen Dörfer vorab laden und cachen
+  const loadOwnVillages = function () {
+    return $.get('/map/village.txt').then(function (txt) {
+      // village.txt hat alle Dörfer der Welt -- wir filtern auf eigene via player_id
+      let myId = game_data.player.id;
+      window._twOpsVillages = [];
+      (txt.match(/[^\r\n]+/g) || []).forEach(function (line) {
+        let parts = line.split(',');
+        // Format: id,name,x,y,player_id,points,rank
+        if (parts.length >= 5 && String(parts[4]) === String(myId)) {
+          window._twOpsVillages.push({
+            id: parseInt(parts[0]),
+            name: parts[1],
+            x: parts[2].trim(),
+            y: parts[3].trim(),
+          });
+        }
+      });
+      console.log('[TWOps] Eigene Dörfer geladen:', window._twOpsVillages.length);
+    }).fail(function () {
+      console.warn('[TWOps] village.txt nicht ladbar, nutze aktuelles Dorf als Fallback');
+      window._twOpsVillages = [];
+    });
   };
 
   // ── ANGRIFF SENDEN (simuliert echte Browserinteraktion) ───────────────────
@@ -161,13 +195,10 @@
       return;
     }
 
-    // Schritt 1: Place-Screen laden um verfügbare Truppen und CSRF zu lesen
-    let placeUrl = TribalWars.buildURL('GET', 'place', {
-      target_x: targetX,
-      target_y: targetY,
-      attack: '1',
-      village: originId,
-    });
+    // Schritt 1: Place-Screen des Herkunftsdorfes laden
+    // URL: /game.php?village=ORIGIN&screen=place&target_x=X&target_y=Y
+    let placeUrl = '/game.php?village=' + originId + '&screen=place'
+      + '&target_x=' + targetX + '&target_y=' + targetY + '&attack=true';
 
     setStatus('Lade...', 'pending', 'imminent');
 
@@ -211,19 +242,30 @@
         return;
       }
 
-      // Schritt 2: Angriffsformular absenden -> Bestätigungsseite
-      let confirmUrl = game_data.link_base_pure + 'place&village=' + originId;
+      // URL-Basis für das Herkunftsdorf -- überschreibt village= aus link_base_pure
+      let baseUrl = '/game.php?village=' + originId + '&screen=place';
 
-      $.post(confirmUrl, formData).then(function (confirmHtml) {
+      // Schritt 2: Angriffsformular absenden -> Bestätigungsseite
+      $.post(baseUrl, formData).then(function (confirmHtml) {
         let $c = $(confirmHtml);
 
-        // Prüfen ob Bestätigungsformular da ist
+        // Debug: in Console loggen was zurückkommt
+        console.log('[TWOps] Bestätigungsseite erhalten, Formular vorhanden:',
+          $c.find('form[name="command-data-form"]').length > 0);
+
         let confirmForm = $c.find('form[name="command-data-form"]');
         if (!confirmForm.length) {
-          // Manchmal kein separates Formular -- direkt gesendet
-          setStatus('Gesendet ✓', 'sent', 'sent');
-          op.status = 'sent';
-          UI.SuccessMessage('Gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
+          // Kein Bestätigungsformular -- evtl. direkt gesendet oder Fehler
+          let errorText = $c.find('.error_box, .error-box, .ui-dialog-content').text().trim();
+          if (errorText) {
+            console.warn('[TWOps] Fehler von Server:', errorText);
+            setStatus('Fehler: ' + errorText.substring(0, 30), 'error', 'error');
+            op.status = 'error';
+          } else {
+            setStatus('Gesendet ✓', 'sent', 'sent');
+            op.status = 'sent';
+            UI.SuccessMessage('Gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
+          }
           return;
         }
 
@@ -233,15 +275,15 @@
           let v = $(this).val();
           if (n) confirmData[n] = v;
         });
-        // Sicherstellen dass attack gesetzt ist
         confirmData['attack'] = 'true';
 
         // Schritt 3: Bestätigung senden
-        let sendUrl = game_data.link_base_pure + 'place&village=' + originId + '&try=confirm';
+        let sendUrl = '/game.php?village=' + originId + '&screen=place&try=confirm';
 
         $.post(sendUrl, confirmData).then(function (result) {
-          // Prüfen ob Fehlerseite
-          if ($(result).find('.error_box, .error-box').length) {
+          let errorText = $(result).find('.error_box, .error-box').text().trim();
+          if (errorText) {
+            console.warn('[TWOps] Sende-Fehler:', errorText);
             setStatus('Fehler (Server)', 'error', 'error');
             op.status = 'error';
             UI.ErrorMessage('Server-Fehler: ' + op.originCoord + ' -> ' + op.targetCoord);
@@ -479,6 +521,9 @@
     Dialog.show('TWOps', ui);
 
     let currentOps = [];
+
+    // Eigene Dörfer vorab laden (für Origin-ID Ermittlung)
+    loadOwnVillages();
 
     // Operationen laden -- nur parsen und Tabelle zeigen, noch nicht planen
     $('#twOpsLoad').on('click', function () {
