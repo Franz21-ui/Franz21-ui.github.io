@@ -1,8 +1,8 @@
 // Hungarian translation provided by =Krumpli=
 // Auto-Send modification: automatically sends all planned farms sequentially
- 
+
 ScriptAPI.register('FarmGod', true, 'Warre', 'nl.tribalwars@coma.innogames.de');
- 
+
 window.FarmGod = {};
 window.FarmGod.Library = (function () {
   /**** TribalWarsLibrary.js ****/
@@ -26,11 +26,11 @@ window.FarmGod.Library = (function () {
           this.list = [];
           this.working = false;
           this.length = 0;
- 
+
           this.doNext = function () {
             let item = this.dequeue();
             let self = this;
- 
+
             if (item.action == 'openWindow') {
               window
                 .open(...item.arguments)
@@ -59,12 +59,12 @@ window.FarmGod.Library = (function () {
                       arguments
                     );
                   }
- 
+
                   self.start();
                 });
             }
           };
- 
+
           this.start = function () {
             if (this.length) {
               this.working = true;
@@ -73,16 +73,16 @@ window.FarmGod.Library = (function () {
               this.working = false;
             }
           };
- 
+
           this.dequeue = function () {
             this.length -= 1;
             return this.list.shift();
           };
- 
+
           this.enqueue = function (item, front = false) {
             front ? this.list.unshift(item) : this.list.push(item);
             this.length += 1;
- 
+
             if (!this.working) {
               this.start();
             }
@@ -90,11 +90,11 @@ window.FarmGod.Library = (function () {
         },
         createQueues: function (amount) {
           let arr = [];
- 
+
           for (let i = 0; i < amount; i++) {
             arr[i] = new twLib.queueLib.Queue();
           }
- 
+
           return arr;
         },
         addItem: function (item) {
@@ -106,9 +106,9 @@ window.FarmGod.Library = (function () {
         orchestrator: function (type, arg) {
           let promise = $.Deferred();
           let item = new twLib.queueLib.Item(type, arg, promise);
- 
+
           twLib.queueLib.addItem(item);
- 
+
           return promise;
         },
       },
@@ -123,18 +123,18 @@ window.FarmGod.Library = (function () {
       },
       openWindow: function () {
         let item = new twLib.queueLib.Item('openWindow', arguments);
- 
+
         twLib.queueLib.addItem(item);
       },
     };
- 
+
     twLib.init();
   }
- 
+
   /**** Script Library ****/
   const setUnitSpeeds = function () {
     let unitSpeeds = {};
- 
+
     $.when($.get('/interface.php?func=get_unit_info')).then((xml) => {
       $(xml)
         .find('config')
@@ -145,20 +145,20 @@ window.FarmGod.Library = (function () {
             .text()
             .toNumber();
         });
- 
+
       localStorage.setItem(
         'FarmGod_unitSpeeds',
         JSON.stringify(unitSpeeds)
       );
     });
   };
- 
+
   const getUnitSpeeds = function () {
     return JSON.parse(localStorage.getItem('FarmGod_unitSpeeds')) || false;
   };
- 
+
   if (!getUnitSpeeds()) setUnitSpeeds();
- 
+
   const determineNextPage = function (page, $html) {
     let villageLength =
       $html.find('#scavenge_mass_screen').length > 0
@@ -191,21 +191,21 @@ window.FarmGod.Library = (function () {
       $('#mobileHeader').length > 0
         ? 10
         : parseInt($html.find('input[name="page_size"]').val());
- 
+
     if (page == -1 && villageLength == 1000) {
       return Math.floor(1000 / pageSize);
     } else if (page < navLength) {
       return page + 1;
     }
- 
+
     return false;
   };
- 
+
   const processPage = function (url, page, wrapFn) {
     let pageText = url.match('am_farm')
       ? `&Farm_page=${page}`
       : `&page=${page}`;
- 
+
     return twLib
       .ajax({
         url: url + pageText,
@@ -214,12 +214,12 @@ window.FarmGod.Library = (function () {
         return wrapFn(page, $(html));
       });
   };
- 
+
   const processAllPages = function (url, processorFn) {
     let page = url.match('am_farm') || url.match('scavenge_mass') ? 0 : -1;
     let wrapFn = function (page, $html) {
       let dnp = determineNextPage(page, $html);
- 
+
       if (dnp) {
         processorFn($html);
         return processPage(url, dnp, wrapFn);
@@ -227,25 +227,25 @@ window.FarmGod.Library = (function () {
         return processorFn($html);
       }
     };
- 
+
     return processPage(url, page, wrapFn);
   };
- 
+
   const getDistance = function (origin, target) {
     let a = origin.toCoord(true).x - target.toCoord(true).x;
     let b = origin.toCoord(true).y - target.toCoord(true).y;
- 
+
     return Math.hypot(a, b);
   };
- 
+
   const subtractArrays = function (array1, array2) {
     let result = array1.map((val, i) => {
       return val - array2[i];
     });
- 
+
     return result.some((v) => v < 0) ? false : result;
   };
- 
+
   const getCurrentServerTime = function () {
     let [hour, min, sec, day, month, year] = $('#serverTime')
       .closest('p')
@@ -253,7 +253,7 @@ window.FarmGod.Library = (function () {
       .match(/\d+/g);
     return new Date(year, month - 1, day, hour, min, sec).getTime();
   };
- 
+
   const timestampFromString = function (timestr) {
     let d = $('#serverDate')
       .text()
@@ -277,7 +277,7 @@ window.FarmGod.Library = (function () {
         .replace('%2', '([\\d+|:]+)')
     ).exec(timestr);
     let t, date;
- 
+
     if (todayPattern !== null) {
       t = todayPattern[1].split(':');
       date = new Date(d[2], d[1] - 1, d[0], t[0], t[1], t[2], t[3] || 0);
@@ -297,25 +297,25 @@ window.FarmGod.Library = (function () {
       t = laterDatePattern[2].split(':');
       date = new Date(d[2], d[1] - 1, d[0], t[0], t[1], t[2], t[3] || 0);
     }
- 
+
     return date.getTime();
   };
- 
+
   String.prototype.toCoord = function (objectified) {
     let c = (this.match(/\d{1,3}\|\d{1,3}/g) || [false]).pop();
     return c && objectified
       ? { x: c.split('|')[0], y: c.split('|')[1] }
       : c;
   };
- 
+
   String.prototype.toNumber = function () {
     return parseFloat(this);
   };
- 
+
   Number.prototype.toNumber = function () {
     return parseFloat(this);
   };
- 
+
   return {
     getUnitSpeeds,
     processPage,
@@ -326,7 +326,7 @@ window.FarmGod.Library = (function () {
     timestampFromString,
   };
 })();
- 
+
 window.FarmGod.Translation = (function () {
   const msg = {
     nl_NL: {
@@ -362,7 +362,7 @@ window.FarmGod.Translation = (function () {
         sendError: 'Error: farm niet verstuurd!',
       },
     },
- 
+
     int: {
       missingFeatures:
         'Script requires a premium account and loot assistent!',
@@ -397,25 +397,25 @@ window.FarmGod.Translation = (function () {
       },
     },
   };
- 
+
   const get = function () {
     let lang = msg.hasOwnProperty(game_data.locale)
       ? game_data.locale
       : 'int';
     return msg[lang];
   };
- 
+
   return {
     get,
   };
 })();
- 
+
 window.FarmGod.Main = (function (Library, Translation) {
   const lib = Library;
   const t = Translation.get();
   let curVillage = null;
   let farmBusy = false;
- 
+
   // ── STATE ──────────────────────────────────────────────────────────────────
   let autoPaused = false;
   let autoRestartTimer = null;
@@ -423,11 +423,11 @@ window.FarmGod.Main = (function (Library, Translation) {
   let currentOptions = {};
   let sessionStats = { sent: 0, errors: 0, runs: 0, villages: {} };
   // ── END STATE ──────────────────────────────────────────────────────────────
- 
+
   // ── AUTO-SEND ──────────────────────────────────────────────────────────────
   const autoSend = function (onComplete) {
     const getDelay = () => Math.floor(Math.random() * 400) + 300; // 300-700ms
- 
+
     // Inject Pause/Resume button above the farm table
     if ($('#farmGodPauseBtn').length === 0) {
       $('#am_widget_Farm').first().before(
@@ -443,31 +443,31 @@ window.FarmGod.Main = (function (Library, Translation) {
         if (!autoPaused) sendNext();
       });
     }
- 
+
     const sendNext = function () {
       if (autoPaused) return;
- 
+
       let $next = $('.farmGod_icon').first();
- 
+
       if ($next.length === 0) {
         // All done -- show stats and schedule restart
         onComplete && onComplete();
         return;
       }
- 
+
       if (farmBusy) {
         setTimeout(sendNext, 100);
         return;
       }
- 
+
       $next.trigger('click');
       setTimeout(sendNext, getDelay());
     };
- 
+
     setTimeout(sendNext, 500);
   };
   // ── END AUTO-SEND ──────────────────────────────────────────────────────────
- 
+
   // ── STATS ──────────────────────────────────────────────────────────────────
   const showStats = function (sent, errors, restartInSec) {
     sessionStats.runs++;
@@ -476,7 +476,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       .slice(0, 3)
       .map(([name, count]) => name + ': ' + count)
       .join(' | ');
- 
+
     let statsHtml =
       '<div id="farmGodStats" style="margin:8px auto;width:98%;background:#f4eed4;border:1px solid #7D510F;padding:6px;font-size:11px;text-align:center;">' +
       '<b>Durchlauf ' + sessionStats.runs + ' abgeschlossen</b><br>' +
@@ -484,20 +484,25 @@ window.FarmGod.Main = (function (Library, Translation) {
       (topVillages ? 'Top Doerfer: ' + topVillages + '<br>' : '') +
       '<span id="farmGodCountdown" style="color:#7D510F;font-weight:bold;">Neustart in ' + restartInSec + 's</span>' +
       '</div>';
- 
+
     $('.farmGodStats').remove();
     $(statsHtml).addClass('farmGodStats').insertBefore('.farmGodContent');
- 
-    // Countdown tick
-    let remaining = restartInSec;
+
+    // Countdown tick -- uses restartEnd timestamp so it stays in sync with the actual restart timer
+    clearInterval(countdownTimer);
+    let restartEnd = Date.now() + restartInSec * 1000;
     countdownTimer = setInterval(function () {
-      remaining--;
-      $('#farmGodCountdown').text('Neustart in ' + remaining + 's');
-      if (remaining <= 0) clearInterval(countdownTimer);
+      let remaining = Math.round((restartEnd - Date.now()) / 1000);
+      if (remaining <= 0) {
+        clearInterval(countdownTimer);
+        $('#farmGodCountdown').text('Neustart...');
+      } else {
+        $('#farmGodCountdown').text('Neustart in ' + remaining + 's');
+      }
     }, 1000);
   };
   // ── END STATS ──────────────────────────────────────────────────────────────
- 
+
   // ── AUTO-RESTART ───────────────────────────────────────────────────────────
   const scheduleRestart = function (minMin, minMax, runOptions) {
     let delayMin = Math.floor(Math.random() * (minMax - minMin + 1) + minMin) * 60 * 1000;
@@ -508,22 +513,22 @@ window.FarmGod.Main = (function (Library, Translation) {
     }, delayMin);
   };
   // ── END AUTO-RESTART ───────────────────────────────────────────────────────
- 
+
   // ── FARM CYCLE ─────────────────────────────────────────────────────────────
   const runFarmCycle = function (opts) {
     getData(opts.group, opts.newbarbs, opts.losses).then((data) => {
       let plan = createPlanning(opts.distance, opts.time, opts.maxloot, data);
       $('.farmGodContent').remove();
       $('#am_widget_Farm').first().before(buildTable(plan.farms));
- 
+
       bindEventHandlers();
       UI.InitProgressBars();
       UI.updateProgressBar($('#FarmGodProgessbar'), 0, plan.counter);
       $('#FarmGodProgessbar').data('current', 0).data('max', plan.counter);
- 
+
       let runSent = 0;
       let runErrors = 0;
- 
+
       // Patch sendFarm to count stats per run
       window._farmGodOnSuccess = function (villageName) {
         runSent++;
@@ -535,15 +540,15 @@ window.FarmGod.Main = (function (Library, Translation) {
       window._farmGodOnError = function () {
         runErrors++;
       };
- 
+
       autoSend(function () {
         // onComplete callback
         let restartSec = Math.floor(
           Math.random() * (opts.restartMax - opts.restartMin + 1) + opts.restartMin
         ) * 60;
- 
+
         showStats(runSent, runErrors, restartSec);
- 
+
         if (opts.restartMin > 0) {
           scheduleRestart(opts.restartMin, opts.restartMax, opts);
         }
@@ -551,7 +556,7 @@ window.FarmGod.Main = (function (Library, Translation) {
     });
   };
   // ── END FARM CYCLE ─────────────────────────────────────────────────────────
- 
+
   const init = function () {
     if (
       game_data.features.Premium.active &&
@@ -560,7 +565,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       if (game_data.screen == 'am_farm') {
         $.when(buildOptions()).then((html) => {
           Dialog.show('FarmGod', html);
- 
+
           $('.optionButton')
             .off('click')
             .on('click', () => {
@@ -569,7 +574,7 @@ window.FarmGod.Main = (function (Library, Translation) {
               clearInterval(countdownTimer);
               autoPaused = false;
               sessionStats = { sent: 0, errors: 0, runs: 0, villages: {} };
- 
+
               let opts = {
                 group:      parseInt($('.optionGroup').val()),
                 distance:   parseFloat($('.optionDistance').val()),
@@ -580,18 +585,18 @@ window.FarmGod.Main = (function (Library, Translation) {
                 restartMin: parseFloat($('.optionRestartMin').val()) || 0,
                 restartMax: parseFloat($('.optionRestartMax').val()) || 0,
               };
- 
+
               // restartMax must be >= restartMin
               if (opts.restartMax < opts.restartMin) opts.restartMax = opts.restartMin;
- 
+
               localStorage.setItem('farmGod_options', JSON.stringify(opts));
- 
+
               $('.optionsContent').html(UI.Throbber[0].outerHTML + '<br><br>');
               Dialog.close();
- 
+
               runFarmCycle(opts);
             });
- 
+
           document.querySelector('.optionButton').focus();
         });
       } else {
@@ -601,7 +606,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       UI.ErrorMessage(t.missingFeatures);
     }
   };
- 
+
   const bindEventHandlers = function () {
     $('.farmGod_icon')
       .off('click')
@@ -615,7 +620,7 @@ window.FarmGod.Main = (function (Library, Translation) {
           UI.ErrorMessage(t.messages.villageError);
         }
       });
- 
+
     $(document)
       .off('keydown')
       .on('keydown', (event) => {
@@ -623,7 +628,7 @@ window.FarmGod.Main = (function (Library, Translation) {
           $('.farmGod_icon').first().trigger('click');
         }
       });
- 
+
     $('.switchVillage')
       .off('click')
       .on('click', function () {
@@ -632,7 +637,7 @@ window.FarmGod.Main = (function (Library, Translation) {
         $(this).closest('tr').remove();
       });
   };
- 
+
   const buildOptions = function () {
     let options = JSON.parse(localStorage.getItem('farmGod_options')) || {
       group: 0,
@@ -653,7 +658,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       options.maxloot = options.optionMaxloot;
       options.newbarbs = options.optionNewbarbs;
     }
- 
+
     let checkboxSettings = [false, true, true, true, false];
     let checkboxError = $('#plunder_list_filters')
       .find('input[type="checkbox"]')
@@ -668,7 +673,7 @@ window.FarmGod.Main = (function (Library, Translation) {
     let templateError =
       $templateRows.first().find('td').last().text().toNumber() >=
       $templateRows.last().find('td').last().text().toNumber();
- 
+
     return $.when(buildGroupSelect(options.group)).then(
       (groupSelect) => {
         return `<style>#popup_box_FarmGod{text-align:center;width:550px;}</style>
@@ -697,13 +702,13 @@ window.FarmGod.Main = (function (Library, Translation) {
       }
     );
   };
- 
+
   const buildGroupSelect = function (id) {
     return $.get(
       TribalWars.buildURL('GET', 'groups', { ajax: 'load_group_menu' })
     ).then((groups) => {
       let html = `<select class="optionGroup">`;
- 
+
       groups.result.forEach((val) => {
         if (val.type == 'separator') {
           html += `<option disabled=""/>`;
@@ -712,24 +717,24 @@ window.FarmGod.Main = (function (Library, Translation) {
             }>${val.name}</option>`;
         }
       });
- 
+
       html += `</select>`;
- 
+
       return html;
     });
   };
- 
+
   const buildTable = function (plan) {
     let html = `<div class="vis farmGodContent"><h4>FarmGod</h4><table class="vis" width="100%">
                 <tr><div id="FarmGodProgessbar" class="progress-bar live-progress-bar progress-bar-alive" style="width:98%;margin:5px auto;"><div style="background: rgb(146, 194, 0);"></div><span class="label" style="margin-top:0px;"></span></div></tr>
                 <tr><th style="text-align:center;">${t.table.origin}</th><th style="text-align:center;">${t.table.target}</th><th style="text-align:center;">${t.table.fields}</th><th style="text-align:center;">${t.table.farm}</th></tr>`;
- 
+
     if (!$.isEmptyObject(plan)) {
       for (let prop in plan) {
         if (game_data.market == 'nl') {
           html += `<tr><td colspan="4" style="background: #e7d098;"><input type="button" class="btn switchVillage" data-id="${plan[prop][0].origin.id}" value="${t.table.goTo} ${plan[prop][0].origin.name} (${plan[prop][0].origin.coord})" style="float:right;"></td></tr>`;
         }
- 
+
         plan[prop].forEach((val, i) => {
           html += `<tr class="farmRow row_${i % 2 == 0 ? 'a' : 'b'}">
                     <td style="text-align:center;"><a href="${game_data.link_base_pure
@@ -749,23 +754,23 @@ window.FarmGod.Main = (function (Library, Translation) {
     } else {
       html += `<tr><td colspan="4" style="text-align: center;">${t.table.noFarmsPlanned}</td></tr>`;
     }
- 
+
     html += `</table></div>`;
- 
+
     return html;
   };
- 
+
   const getData = function (group, newbarbs, losses) {
     let data = {
       villages: {},
       commands: {},
       farms: { templates: {}, farms: {} },
     };
- 
+
     let villagesProcessor = ($html) => {
       let skipUnits = ['ram', 'catapult', 'knight', 'snob', 'militia'];
       const mobileCheck = $('#mobileHeader').length > 0;
- 
+
       if (mobileCheck) {
         let table = jQuery($html).find('.overview-container > div');
         table.each((i, el) => {
@@ -780,12 +785,12 @@ window.FarmGod.Main = (function (Library, Translation) {
               .find('.quickedit-label')
               .text()
               .toCoord();
- 
+
             const units = new Array(game_data.units.length).fill(0);
             const unitsElements = jQuery(el).find(
               '.overview-units-row > div.unit-row-item'
             );
- 
+
             unitsElements.each((_, unitElement) => {
               const img = jQuery(unitElement).find('img');
               const span =
@@ -805,12 +810,12 @@ window.FarmGod.Main = (function (Library, Translation) {
                 }
               }
             });
- 
+
             const filteredUnits = units.filter(
               (_, index) =>
                 skipUnits.indexOf(game_data.units[index]) === -1
             );
- 
+
             data.villages[coord] = {
               name: name,
               id: villageId,
@@ -831,7 +836,7 @@ window.FarmGod.Main = (function (Library, Translation) {
             let $el = $(el);
             let $qel = $el.find('.quickedit-label').first();
             let units = [];
- 
+
             units = $el
               .find('.unit-item')
               .filter((index, element) => {
@@ -844,7 +849,7 @@ window.FarmGod.Main = (function (Library, Translation) {
                 return $(element).text().toNumber();
               })
               .get();
- 
+
             return (data.villages[$qel.text().toCoord()] = {
               name: $qel.data('text'),
               id: parseInt(
@@ -854,11 +859,11 @@ window.FarmGod.Main = (function (Library, Translation) {
             });
           });
       }
- 
+
       console.log('villages', data.villages);
       return data;
     };
- 
+
     let commandsProcessor = ($html) => {
       $html
         .find('#commands_table')
@@ -870,7 +875,7 @@ window.FarmGod.Main = (function (Library, Translation) {
             .first()
             .text()
             .toCoord();
- 
+
           if (coord) {
             if (!data.commands.hasOwnProperty(coord))
               data.commands[coord] = [];
@@ -883,21 +888,21 @@ window.FarmGod.Main = (function (Library, Translation) {
             );
           }
         });
- 
+
       return data;
     };
- 
+
     let farmProcessor = ($html) => {
       if ($.isEmptyObject(data.farms.templates)) {
         let unitSpeeds = lib.getUnitSpeeds();
- 
+
         $html
           .find('form[action*="action=edit_all"]')
           .find('input[type="hidden"][name*="template"]')
           .closest('tr')
           .map((i, el) => {
             let $el = $(el);
- 
+
             return (data.farms.templates[
               $el
                 .prev('tr')
@@ -941,13 +946,13 @@ window.FarmGod.Main = (function (Library, Translation) {
             });
           });
       }
- 
+
       $html
         .find('#plunder_list')
         .find('tr[id^="village_"]')
         .map((i, el) => {
           let $el = $(el);
- 
+
           return (data.farms.farms[
             $el
               .find('a[href*="screen=report&mode=all&view="]')
@@ -963,10 +968,10 @@ window.FarmGod.Main = (function (Library, Translation) {
             max_loot: $el.find('img[src*="max_loot/1"]').length > 0,
           });
         });
- 
+
       return data;
     };
- 
+
     let findNewbarbs = () => {
       if (newbarbs) {
         return twLib.get('/map/village.txt').then((allVillages) => {
@@ -974,7 +979,7 @@ window.FarmGod.Main = (function (Library, Translation) {
             let [id, name, x, y, player_id] =
               villageData.split(',');
             let coord = `${x}|${y}`;
- 
+
             if (
               player_id == 0 &&
               !data.farms.farms.hasOwnProperty(coord)
@@ -984,14 +989,14 @@ window.FarmGod.Main = (function (Library, Translation) {
               };
             }
           });
- 
+
           return data;
         });
       } else {
         return data;
       }
     };
- 
+
     let filterFarms = () => {
       data.farms.farms = Object.fromEntries(
         Object.entries(data.farms.farms).filter(([key, val]) => {
@@ -1003,10 +1008,10 @@ window.FarmGod.Main = (function (Library, Translation) {
           );
         })
       );
- 
+
       return data;
     };
- 
+
     return Promise.all([
       lib.processAllPages(
         TribalWars.buildURL('GET', 'overview_villages', {
@@ -1033,7 +1038,7 @@ window.FarmGod.Main = (function (Library, Translation) {
         return data;
       });
   };
- 
+
   const createPlanning = function (
     optionDistance,
     optionTime,
@@ -1042,14 +1047,14 @@ window.FarmGod.Main = (function (Library, Translation) {
   ) {
     let plan = { counter: 0, farms: {} };
     let serverTime = Math.round(lib.getCurrentServerTime() / 1000);
- 
+
     for (let prop in data.villages) {
       let orderedFarms = Object.keys(data.farms.farms)
         .map((key) => {
           return { coord: key, dis: lib.getDistance(prop, key) };
         })
         .sort((a, b) => (a.dis > b.dis ? 1 : -1));
- 
+
       orderedFarms.forEach((el) => {
         let farmIndex = data.farms.farms[el.coord];
         let template_name =
@@ -1063,7 +1068,7 @@ window.FarmGod.Main = (function (Library, Translation) {
           data.villages[prop].units,
           template.units
         );
- 
+
         let distance = lib.getDistance(prop, el.coord);
         let arrival = Math.round(
           serverTime +
@@ -1085,11 +1090,11 @@ window.FarmGod.Main = (function (Library, Translation) {
         } else {
           data.commands[el.coord] = [];
         }
- 
+
         if (unitsLeft && timeDiff && distance < optionDistance) {
           plan.counter++;
           if (!plan.farms.hasOwnProperty(prop)) plan.farms[prop] = [];
- 
+
           plan.farms[prop].push({
             origin: {
               coord: prop,
@@ -1100,16 +1105,16 @@ window.FarmGod.Main = (function (Library, Translation) {
             fields: distance,
             template: { name: template_name, id: template.id },
           });
- 
+
           data.villages[prop].units = unitsLeft;
           data.commands[el.coord].push(arrival);
         }
       });
     }
- 
+
     return plan;
   };
- 
+
   const sendFarm = function ($this) {
     let n = Timing.getElapsedTimeSinceLoad();
     if (
@@ -1122,7 +1127,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       farmBusy = true;
       Accountmanager.farm.last_click = n;
       let $pb = $('#FarmGodProgessbar');
- 
+
       TribalWars.post(
         Accountmanager.send_units_link.replace(
           /village=(\d+)/,
@@ -1162,12 +1167,12 @@ window.FarmGod.Main = (function (Library, Translation) {
       );
     }
   };
- 
+
   return {
     init,
   };
 })(window.FarmGod.Library, window.FarmGod.Translation);
- 
+
 (() => {
   window.FarmGod.Main.init();
 })();
