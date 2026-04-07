@@ -1,56 +1,54 @@
-// TW Operation Scheduler v2
-// Import DS-Ultimate Export, individuelle Truppeneinstellung, automatischer Versand
+// TW Operation Scheduler v3
 // Autor: Shop21 / W252
 
 (() => {
 
-  // ── EINHEITENLISTE ─────────────────────────────────────────────────────────
   const UNITS = [
-    { key: 'spear',    label: 'Speer'    },
-    { key: 'sword',    label: 'Schwert'  },
-    { key: 'axe',      label: 'Axt'      },
-    { key: 'spy',      label: 'Aufkl.'   },
-    { key: 'light',    label: 'LKav'     },
-    { key: 'heavy',    label: 'SKav'     },
-    { key: 'ram',      label: 'Ramme'    },
-    { key: 'catapult', label: 'Kata'     },
-    { key: 'snob',     label: 'Adel'     },
-    { key: 'knight',   label: 'Paladin'  },
+    { key: 'spear',    label: 'Speer'   },
+    { key: 'sword',    label: 'Schwert' },
+    { key: 'axe',      label: 'Axt'     },
+    { key: 'spy',      label: 'Aufkl.'  },
+    { key: 'light',    label: 'LKav'    },
+    { key: 'heavy',    label: 'SKav'    },
+    { key: 'ram',      label: 'Ramme'   },
+    { key: 'catapult', label: 'Kata'    },
+    { key: 'snob',     label: 'Adel'    },
+    { key: 'knight',   label: 'Paladin' },
   ];
 
-  // DS-Ultimate Einheitenbezeichnungen -> key
   const UNIT_MAP = {
-    'ramme': 'ram', 'rammboeck': 'ram', 'rammbock': 'ram',
-    'axt': 'axe', 'axtkampfer': 'axe', 'axtkämpfer': 'axe',
-    'speer': 'spear', 'schwert': 'sword',
-    'lkav': 'light', 'leichte': 'light',
-    'skav': 'heavy', 'schwere': 'heavy',
-    'kata': 'catapult', 'katapult': 'catapult',
-    'aufkl': 'spy', 'adel': 'snob', 'paladin': 'knight',
-    'bogi': 'archer', 'berittener': 'marcher',
+    'ramme':'ram','rammboeck':'ram','rammbock':'ram',
+    'axt':'axe','axtkampfer':'axe',
+    'speer':'spear','schwert':'sword',
+    'lkav':'light','leichte':'light',
+    'skav':'heavy','schwere':'heavy',
+    'kata':'catapult','katapult':'catapult',
+    'aufkl':'spy','adel':'snob','paladin':'knight',
   };
 
-  // ── SERVER-ZEIT ────────────────────────────────────────────────────────────
-  let _serverOffset = 0;
+  const KNOWN_FIELDS = [
+    'template_id','source_village','spear','sword','axe','spy',
+    'light','heavy','ram','catapult','snob','knight','archer','marcher',
+    'x','y','target_type','input','attack','support'
+  ];
 
+  // SERVER-ZEIT
+  let _serverOffset = 0;
   const initServerOffset = function () {
     try {
       let text = $('#serverTime').closest('p').text();
-      let m = text.match(/(\d+):(\d+):(\d+)/);
+      let m  = text.match(/(\d+):(\d+):(\d+)/);
       let dm = text.match(/(\d+)\.(\d+)\.(\d+)/);
       if (!m || !dm) return;
-      let serverTs = new Date(
-        parseInt(dm[3]) < 100 ? 2000 + parseInt(dm[3]) : parseInt(dm[3]),
-        parseInt(dm[2]) - 1, parseInt(dm[1]),
-        parseInt(m[1]), parseInt(m[2]), parseInt(m[3])
-      ).getTime();
-      _serverOffset = serverTs - Date.now();
-    } catch (e) { _serverOffset = 0; }
+      let y = parseInt(dm[3]) < 100 ? 2000 + parseInt(dm[3]) : parseInt(dm[3]);
+      let ts = new Date(y, parseInt(dm[2])-1, parseInt(dm[1]),
+        parseInt(m[1]), parseInt(m[2]), parseInt(m[3])).getTime();
+      _serverOffset = ts - Date.now();
+    } catch(e) { _serverOffset = 0; }
   };
-
   const serverNow = () => Date.now() + _serverOffset;
 
-  // ── PARSER ─────────────────────────────────────────────────────────────────
+  // PARSER
   const parseExport = function (raw) {
     let ops = [];
     raw.trim().split('\n').forEach((line, i) => {
@@ -59,111 +57,70 @@
       let cols = line.split('\t');
       if (cols.length < 8) cols = line.split(/\s{2,}/);
       if (cols.length < 8) return;
-
       try {
-        let type       = cols[0].trim().replace(/[()]/g, '').toLowerCase();
         let originFull = cols[2].trim();
         let unitRaw    = cols[3].trim();
         let targetFull = cols[5].trim();
-        let departStr  = cols[6].trim();
-        let arriveStr  = cols[7].trim();
-
         let originCoord = (originFull.match(/\((\d+)\|(\d+)\)/) || [])[0];
         let targetCoord = (targetFull.match(/\((\d+)\|(\d+)\)/) || [])[0];
         if (!originCoord || !targetCoord) return;
-
-        let originVillage = originFull.replace(/\s*\(.*\).*$/, '').trim();
-        let targetName    = targetFull.replace(/\s*\(.*\).*$/, '').trim();
-
-        // Einheit aus DS-Ultimate Namen mappen
         let unitKey = null;
-        let unitLower = unitRaw.toLowerCase();
-        for (let k in UNIT_MAP) {
-          if (unitLower.includes(k)) { unitKey = UNIT_MAP[k]; break; }
-        }
-
-        const parseTime = (str) => {
+        let ul = unitRaw.toLowerCase();
+        for (let k in UNIT_MAP) { if (ul.includes(k)) { unitKey = UNIT_MAP[k]; break; } }
+        const pt = (str) => {
           let m = str.match(/(\d+)\.(\d+)\.(\d+)\s+(\d+):(\d+):(\d+)/);
           if (!m) return null;
-          let y = parseInt(m[3]) < 100 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
-          return new Date(y, parseInt(m[2])-1, parseInt(m[1]),
-            parseInt(m[4]), parseInt(m[5]), parseInt(m[6])).getTime();
+          let y = parseInt(m[3]) < 100 ? 2000+parseInt(m[3]) : parseInt(m[3]);
+          return new Date(y,parseInt(m[2])-1,parseInt(m[1]),parseInt(m[4]),parseInt(m[5]),parseInt(m[6])).getTime();
         };
-
-        let departTs = parseTime(departStr);
-        let arriveTs = parseTime(arriveStr);
+        let departTs = pt(cols[6].trim());
+        let arriveTs = pt(cols[7].trim());
         if (!departTs || !arriveTs) return;
-
-        // Truppen: leer = wird vom Nutzer in der Tabelle eingetragen
         let troops = {};
-        if (unitKey) troops[unitKey] = 'all'; // Default: alle der erkannten Einheit
-
+        if (unitKey) troops[unitKey] = 'all';
         ops.push({
           id: i,
-          type, originVillage, originCoord, targetName, targetCoord,
-          unitRaw, troops,
-          departTs, arriveTs,
-          status: 'pending',
-          timerId: null,
+          type: cols[0].trim().replace(/[()]/g,'').toLowerCase(),
+          originVillage: originFull.replace(/\s*\(.*\).*$/,'').trim(),
+          originCoord, targetCoord,
+          targetName: targetFull.replace(/\s*\(.*\).*$/,'').trim(),
+          unitRaw, troops, departTs, arriveTs,
+          status: 'pending', timerId: null,
         });
-      } catch (e) {
-        console.warn('Zeile ' + i + ' Fehler:', e);
-      }
+      } catch(e) { console.warn('[TWOps] Parse-Fehler Zeile '+i, e); }
     });
-
-    return ops.sort((a, b) => a.departTs - b.departTs);
+    return ops.sort((a,b) => a.departTs - b.departTs);
   };
 
-  // ── ORIGIN-ID ERMITTELN ────────────────────────────────────────────────────
-  // game_data.village ist ein Objekt {id, name, ...}, nicht direkt eine Zahl
-  // game_data.villages existiert nicht im Browser -- wir nutzen village_overview
-  const getOriginId = function (op) {
-    let parts = op.originCoord.replace(/[()]/g, '').split('|');
-    let ox = parts[0].trim(), oy = parts[1].trim();
-
-    // Koordinaten des aktuellen Dorfes prüfen
-    let currentVillage = game_data.village;
-    if (currentVillage && String(currentVillage.x) === ox && String(currentVillage.y) === oy) {
-      return currentVillage.id;
-    }
-
-    // Alle eigenen Dörfer aus der Übersicht suchen (gecacht in window._twOpsVillages)
-    if (window._twOpsVillages) {
-      for (let v of window._twOpsVillages) {
-        if (String(v.x) === ox && String(v.y) === oy) return v.id;
-      }
-    }
-
-    // Fallback: aktuelles Dorf-ID
-    return currentVillage ? currentVillage.id : game_data.village_id;
-  };
-
-  // Alle eigenen Dörfer vorab laden und cachen
+  // DOERFER
   const loadOwnVillages = function () {
     return $.get('/map/village.txt').then(function (txt) {
-      // village.txt hat alle Dörfer der Welt -- wir filtern auf eigene via player_id
       let myId = game_data.player.id;
       window._twOpsVillages = [];
-      (txt.match(/[^\r\n]+/g) || []).forEach(function (line) {
-        let parts = line.split(',');
-        // Format: id,name,x,y,player_id,points,rank
-        if (parts.length >= 5 && String(parts[4]) === String(myId)) {
-          window._twOpsVillages.push({
-            id: parseInt(parts[0]),
-            name: parts[1],
-            x: parts[2].trim(),
-            y: parts[3].trim(),
-          });
+      (txt.match(/[^\r\n]+/g)||[]).forEach(function(line){
+        let p = line.split(',');
+        if (p.length >= 5 && String(p[4]) === String(myId)) {
+          window._twOpsVillages.push({ id:parseInt(p[0]), x:p[2].trim(), y:p[3].trim() });
         }
       });
-      console.log('[TWOps] Eigene Dörfer geladen:', window._twOpsVillages.length);
-    }).fail(function () {
-      console.warn('[TWOps] village.txt nicht ladbar, nutze aktuelles Dorf als Fallback');
-      window._twOpsVillages = [];
-    });
+      console.log('[TWOps] Doerfer geladen:', window._twOpsVillages.length);
+    }).fail(function(){ window._twOpsVillages = []; });
   };
 
-  // ── ANGRIFF SENDEN (simuliert echte Browserinteraktion) ───────────────────
+  const getOriginId = function (op) {
+    let parts = op.originCoord.replace(/[()]/g,'').split('|');
+    let ox = parts[0].trim(), oy = parts[1].trim();
+    let cv = game_data.village;
+    if (cv && String(cv.x)===ox && String(cv.y)===oy) return cv.id;
+    if (window._twOpsVillages) {
+      for (let v of window._twOpsVillages) {
+        if (v.x===ox && v.y===oy) return v.id;
+      }
+    }
+    return cv ? cv.id : null;
+  };
+
+  // ANGRIFF SENDEN
   const sendAttack = function (op) {
     let stEl  = document.getElementById('twOpsSt_'  + op.id);
     let cdEl  = document.getElementById('twOpsCd_'  + op.id);
@@ -175,296 +132,205 @@
       if (rowEl) rowEl.className = rowCls || cls;
     };
 
-    let tparts = op.targetCoord.replace(/[()]/g, '').split('|');
+    let tparts = op.targetCoord.replace(/[()]/g,'').split('|');
     let targetX = tparts[0].trim(), targetY = tparts[1].trim();
     let originId = getOriginId(op);
 
-    // Truppen-Objekt aufbauen -- 'all' wird spaeter durch echte Zahl ersetzt
+    if (!originId) { setStatus('Kein Dorf', 'error', 'error'); op.status='error'; return; }
+
     let troopData = {};
     UNITS.forEach(u => {
       let val = op.troops[u.key];
-      if (val && val !== '0' && val !== '') {
-        troopData[u.key] = val; // 'all' oder Zahl als String
-      }
+      if (val && val !== '0' && val !== '') troopData[u.key] = val;
     });
-
-    if (Object.keys(troopData).length === 0) {
-      setStatus('Keine Truppen', 'error', 'error');
-      op.status = 'error';
-      UI.ErrorMessage('Keine Truppen für: ' + op.originCoord + ' -> ' + op.targetCoord);
-      return;
+    if (!Object.keys(troopData).length) {
+      setStatus('Keine Truppen', 'error', 'error'); op.status='error'; return;
     }
-
-    // Schritt 1: Place-Screen des Herkunftsdorfes laden
-    // URL: /game.php?village=ORIGIN&screen=place&target_x=X&target_y=Y
-    // x/y sind die korrekten Parameter fuer die Zielkoordinaten im Place-Screen
-    let placeUrl = '/game.php?village=' + originId + '&screen=place'
-      + '&x=' + targetX + '&y=' + targetY;
 
     setStatus('Lade...', 'pending', 'imminent');
 
-    $.get(placeUrl).then(function (html) {
-      let $html = $(html);
+    // Schritt 1: Place-Screen laden
+    $.get('/game.php?village=' + originId + '&screen=place&x=' + targetX + '&y=' + targetY)
+      .then(function (html) {
+        let $html = $(html);
 
-      // CSRF Token
-      let h = $html.find('input[name="h"]').val()
-            || $html.find('input[name="ch"]').val()
-            || game_data.csrf;
-
-      // 'all' durch tatsaechliche Truppenzahl ersetzen
-      let formData = { attack: 'true', h: h };
-
-      let hasUnits = false;
-      UNITS.forEach(u => {
-        let val = troopData[u.key];
-        if (!val) return;
-
-        let inputEl = $html.find('input[name="' + u.key + '"]');
-        if (!inputEl.length) return;
-
-        let available = parseInt(
-          inputEl.attr('data-all-count') ||
-          inputEl.attr('max') ||
-          inputEl.val() ||
-          '0'
-        );
-
-        let count = (val === 'all') ? available : Math.min(parseInt(val) || 0, available);
-        if (count > 0) {
-          formData[u.key] = count;
-          hasUnits = true;
-        }
-      });
-
-      if (!hasUnits) {
-        setStatus('Keine Truppen verfügbar', 'error', 'error');
-        op.status = 'error';
-        UI.ErrorMessage('Keine Truppen verfügbar: ' + op.originCoord + ' -> ' + op.targetCoord);
-        return;
-      }
-
-      // URL-Basis für das Herkunftsdorf -- überschreibt village= aus link_base_pure
-      let baseUrl = '/game.php?village=' + originId + '&screen=place';
-
-      // Schritt 2: Angriffsformular absenden -> Bestätigungsseite
-      $.post(baseUrl, formData).then(function (confirmHtml) {
-        let $c = $(confirmHtml);
-
-        // Debug: in Console loggen was zurückkommt
-        console.log('[TWOps] Bestätigungsseite erhalten, Formular vorhanden:',
-          $c.find('form[name="command-data-form"]').length > 0);
-
-        let confirmForm = $c.find('form[name="command-data-form"]');
-        if (!confirmForm.length) {
-          // Kein Bestätigungsformular -- evtl. direkt gesendet oder Fehler
-          let errorText = $c.find('.error_box, .error-box, .ui-dialog-content').text().trim();
-          if (errorText) {
-            console.warn('[TWOps] Fehler von Server:', errorText);
-            setStatus('Fehler: ' + errorText.substring(0, 30), 'error', 'error');
-            op.status = 'error';
-          } else {
-            setStatus('Gesendet ✓', 'sent', 'sent');
-            op.status = 'sent';
-            UI.SuccessMessage('Gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
-          }
-          return;
-        }
-
-        let confirmData = {};
-        confirmForm.find('input').each(function () {
-          let n = $(this).attr('name');
-          let v = $(this).val();
-          let t = $(this).attr('type');
-          // Alle inputs übernehmen außer Submit-Buttons die nicht attack sind
-          if (n && !(t === 'submit' && n !== 'attack')) {
-            confirmData[n] = v;
+        // CSRF: erstes unbekanntes hidden input
+        let csrfName = null, csrfVal = null;
+        $html.find('input[type="hidden"]').each(function () {
+          let n = $(this).attr('name') || '';
+          if (n && KNOWN_FIELDS.indexOf(n) === -1) {
+            csrfName = n; csrfVal = $(this).val(); return false;
           }
         });
-        // Attack-Button explizit setzen
-        confirmData['attack'] = 'Angreifen';
-        console.log('[TWOps] Bestätigungsdaten:', confirmData);
+        console.log('[TWOps] CSRF:', csrfName, '=', csrfVal);
 
-        // Schritt 3: Bestätigung senden
-        let sendUrl = '/game.php?village=' + originId + '&screen=place&try=confirm';
+        // Formular aufbauen
+        let formData = { x: targetX, y: targetY, attack: 'Angreifen', source_village: String(originId) };
+        if (csrfName) formData[csrfName] = csrfVal;
 
-        $.post(sendUrl, confirmData).then(function (result) {
-          let errorText = $(result).find('.error_box, .error-box').text().trim();
-          if (errorText) {
-            console.warn('[TWOps] Sende-Fehler:', errorText);
-            setStatus('Fehler (Server)', 'error', 'error');
-            op.status = 'error';
-            UI.ErrorMessage('Server-Fehler: ' + op.originCoord + ' -> ' + op.targetCoord);
-            return;
-          }
-          setStatus('Gesendet ✓', 'sent', 'sent');
-          op.status = 'sent';
-          UI.SuccessMessage('Gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
-        }).fail(function () {
-          setStatus('Fehler (Senden)', 'error', 'error');
-          op.status = 'error';
+        let hasUnits = false;
+        UNITS.forEach(u => {
+          let val = troopData[u.key];
+          if (!val) return;
+          let el = $html.find('input[name="' + u.key + '"]');
+          if (!el.length) return;
+          let avail = parseInt(el.attr('data-all-count') || el.attr('max') || '0');
+          let count = (val === 'all') ? avail : Math.min(parseInt(val)||0, avail);
+          if (count > 0) { formData[u.key] = String(count); hasUnits = true; }
         });
 
-      }).fail(function () {
-        setStatus('Fehler (Bestätigung)', 'error', 'error');
-        op.status = 'error';
-      });
+        if (!hasUnits) { setStatus('Keine Truppen verfuegbar', 'error', 'error'); op.status='error'; return; }
 
-    }).fail(function () {
-      setStatus('Fehler (Place)', 'error', 'error');
-      op.status = 'error';
-    });
+        console.log('[TWOps] POST Schritt 1:', JSON.stringify(formData));
+
+        // Schritt 2: POST -> Bestaetigung
+        $.post('/game.php?village=' + originId + '&screen=place', formData)
+          .then(function (confirmHtml) {
+            let $c = $(confirmHtml);
+            let forms = $c.find('form').map(function(){ return $(this).attr('name')||$(this).attr('id')||'?'; }).get();
+            let err   = $c.find('.error_box,.system_wide_message').text().trim();
+            console.log('[TWOps] Schritt2 - Formulare:', forms, '| Fehler:', err);
+
+            if (err) { setStatus('Fehler: '+err.substring(0,30), 'error','error'); op.status='error'; return; }
+
+            let confirmForm = $c.find('form[name="command-data-form"]');
+            if (!confirmForm.length) {
+              // Kein Bestaetigunsformular
+              console.log('[TWOps] Kein command-data-form. Inputs:', $c.find('input').map(function(){ return $(this).attr('name')+'='+$(this).val(); }).get());
+              setStatus('Gesendet?', 'sent', 'sent'); op.status='sent'; return;
+            }
+
+            let confirmData = {};
+            confirmForm.find('input').each(function () {
+              let n=$(this).attr('name'), v=$(this).val(), t=$(this).attr('type')||'';
+              if (n && t !== 'submit') confirmData[n] = v;
+            });
+            confirmData['attack'] = 'Angreifen';
+            console.log('[TWOps] POST Schritt 2:', JSON.stringify(confirmData));
+
+            // Schritt 3
+            $.post('/game.php?village=' + originId + '&screen=place&try=confirm', confirmData)
+              .then(function (result) {
+                let e2 = $(result).find('.error_box,.system_wide_message').text().trim();
+                console.log('[TWOps] Schritt3 Fehler:', e2);
+                if (e2) { setStatus('Fehler Final', 'error','error'); op.status='error'; return; }
+                setStatus('Gesendet OK', 'sent', 'sent');
+                op.status = 'sent';
+                UI.SuccessMessage('Gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
+              })
+              .fail(function(){ setStatus('Fehler Senden', 'error','error'); op.status='error'; });
+
+          }).fail(function(){ setStatus('Fehler POST', 'error','error'); op.status='error'; });
+
+      }).fail(function(){ setStatus('Fehler Place', 'error','error'); op.status='error'; });
   };
 
-  // ── UI ─────────────────────────────────────────────────────────────────────
-  const buildCSS = () => `
-    <style>
-      #popup_box_TWOps { width: 900px !important; max-height: 90vh; overflow-y: auto; }
-      #twOpsBox { font-family: Arial, sans-serif; font-size: 11px; }
-      #twOpsBox h3 { margin: 0 0 6px 0; font-size: 14px; }
-      #twOpsBox textarea { width: 100%; height: 100px; font-size: 10px; resize: vertical; box-sizing: border-box; }
-      #twOpsBox .ops-toolbar { margin: 6px 0; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-      #twOpsBox table.ops-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
-      #twOpsBox table.ops-table th { background: #7D510F; color: #fff; padding: 3px 4px; text-align: center; white-space: nowrap; }
-      #twOpsBox table.ops-table td { padding: 2px 4px; border-bottom: 1px solid #ccc; text-align: center; vertical-align: middle; }
-      #twOpsBox tr.pending td { background: #f4eed4; }
-      #twOpsBox tr.sent td { background: #d4edda; }
-      #twOpsBox tr.error td { background: #f8d7da; }
-      #twOpsBox tr.missed td { background: #fff3cd; }
-      #twOpsBox tr.imminent td { background: #ffe0b2; font-weight: bold; }
-      .ops-countdown { font-weight: bold; color: #7D510F; font-size: 11px; }
-      .ops-status-sent { color: #155724; font-weight: bold; }
-      .ops-status-error { color: #721c24; font-weight: bold; }
-      .ops-status-missed { color: #856404; font-weight: bold; }
-      .ops-status-pending { color: #555; }
-      .ops-troop-input { width: 36px; text-align: center; font-size: 10px; padding: 1px 2px; }
-      .ops-all-btn { font-size: 9px; padding: 1px 3px; cursor: pointer; margin-left: 1px; }
-      #twOpsSummary { margin-top: 6px; padding: 4px 8px; background: #f4eed4; border: 1px solid #7D510F; font-size: 11px; }
-      .ops-troop-cell { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; min-width: 220px; }
-      .ops-troop-entry { display: flex; flex-direction: column; align-items: center; font-size: 9px; }
-      .ops-troop-entry label { color: #555; margin-bottom: 1px; }
-    </style>
-  `;
+  // UI
+  const buildCSS = () => '<style>'
+    + '#popup_box_TWOps{width:920px!important;max-height:90vh;overflow-y:auto}'
+    + '#twOpsBox{font-family:Arial,sans-serif;font-size:11px}'
+    + '#twOpsBox h3{margin:0 0 6px;font-size:14px}'
+    + '#twOpsBox textarea{width:100%;height:100px;font-size:10px;resize:vertical;box-sizing:border-box}'
+    + '#twOpsBox .ops-toolbar{margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap}'
+    + '#twOpsBox table.ops-table{width:100%;border-collapse:collapse;margin-top:6px}'
+    + '#twOpsBox table.ops-table th{background:#7D510F;color:#fff;padding:3px 4px;text-align:center;white-space:nowrap}'
+    + '#twOpsBox table.ops-table td{padding:2px 4px;border-bottom:1px solid #ccc;text-align:center;vertical-align:middle}'
+    + '#twOpsBox tr.pending td{background:#f4eed4}'
+    + '#twOpsBox tr.sent td{background:#d4edda}'
+    + '#twOpsBox tr.error td{background:#f8d7da}'
+    + '#twOpsBox tr.missed td{background:#fff3cd}'
+    + '#twOpsBox tr.imminent td{background:#ffe0b2;font-weight:bold}'
+    + '.ops-countdown{font-weight:bold;color:#7D510F}'
+    + '.ops-status-sent{color:#155724;font-weight:bold}'
+    + '.ops-status-error{color:#721c24;font-weight:bold}'
+    + '.ops-status-missed{color:#856404;font-weight:bold}'
+    + '.ops-status-pending{color:#555}'
+    + '.ops-troop-input{width:36px;text-align:center;font-size:10px;padding:1px 2px}'
+    + '.ops-all-btn{font-size:9px;padding:1px 3px;cursor:pointer;margin-left:1px}'
+    + '#twOpsSummary{margin-top:6px;padding:4px 8px;background:#f4eed4;border:1px solid #7D510F}'
+    + '.ops-troop-cell{display:flex;flex-wrap:wrap;gap:2px;justify-content:center}'
+    + '.ops-troop-entry{display:flex;flex-direction:column;align-items:center;font-size:9px}'
+    + '.ops-troop-entry label{color:#555;margin-bottom:1px}'
+    + '</style>';
 
   const buildTroopCell = (op) => {
-    let html = '<div class="ops-troop-cell">';
+    let h = '<div class="ops-troop-cell">';
     UNITS.forEach(u => {
       let val = op.troops[u.key] || '';
-      let displayVal = (val === 'all') ? '' : val; // 'all' -> leeres Feld mit Placeholder
-      let placeholder = (val === 'all') ? 'alle' : '0';
-      html += `<div class="ops-troop-entry">
-        <label>${u.label}</label>
-        <div style="display:flex;align-items:center;">
-          <input class="ops-troop-input" type="text"
-            data-op="${op.id}" data-unit="${u.key}"
-            value="${displayVal}" placeholder="${placeholder}"
-            title="${u.label}">
-          <button class="ops-all-btn" data-op="${op.id}" data-unit="${u.key}" title="Alle">∞</button>
-        </div>
-      </div>`;
+      let dv  = (val==='all') ? '' : val;
+      let ph  = (val==='all') ? 'alle' : '0';
+      h += '<div class="ops-troop-entry"><label>' + u.label + '</label>'
+        + '<div style="display:flex;align-items:center;">'
+        + '<input class="ops-troop-input" type="text"'
+        + ' data-op="' + op.id + '" data-unit="' + u.key + '"'
+        + ' value="' + dv + '" placeholder="' + ph + '">'
+        + '<button class="ops-all-btn" data-op="' + op.id + '" data-unit="' + u.key + '">∞</button>'
+        + '</div></div>';
     });
-    html += '</div>';
-    return html;
+    return h + '</div>';
   };
 
   const buildTable = (ops) => {
-    if (!ops.length) {
-      return '<p style="text-align:center;color:#c00;margin-top:8px;">Keine gültigen Operationen gefunden. Format prüfen.</p>';
-    }
-
-    let html = `<table class="ops-table">
-      <tr>
-        <th>#</th><th>Typ</th><th>Herkunft</th><th>Ziel</th>
-        <th>Truppen (leer=0, ∞=alle)</th>
-        <th>Abfahrt</th><th>Ankunft</th><th>Countdown</th><th>Status</th>
-      </tr>`;
-
-    const fmt = ts => new Date(ts).toLocaleString('de-DE', {
-      day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'
+    if (!ops.length) return '<p style="text-align:center;color:#c00;margin-top:8px">Keine Operationen gefunden.</p>';
+    const fmt = ts => new Date(ts).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    let h = '<table class="ops-table"><tr><th>#</th><th>Typ</th><th>Herkunft</th><th>Ziel</th><th>Truppen (leer=0, ∞=alle)</th><th>Abfahrt</th><th>Ankunft</th><th>Countdown</th><th>Status</th></tr>';
+    ops.forEach((op,i) => {
+      h += '<tr id="twOpsRow_'+op.id+'" class="'+op.status+'">'
+        +'<td>'+(i+1)+'</td>'
+        +'<td>'+(op.type==='fake'?'<span style="color:#888">(F)</span>':'<b>(R)</b>')+'</td>'
+        +'<td style="text-align:left" title="'+op.originCoord+'">'+op.originVillage+'</td>'
+        +'<td style="text-align:left" title="'+op.targetCoord+'">'+op.targetName+'</td>'
+        +'<td>'+buildTroopCell(op)+'</td>'
+        +'<td style="white-space:nowrap">'+fmt(op.departTs)+'</td>'
+        +'<td style="white-space:nowrap">'+fmt(op.arriveTs)+'</td>'
+        +'<td><span id="twOpsCd_'+op.id+'" class="ops-countdown">--</span></td>'
+        +'<td><span id="twOpsSt_'+op.id+'" class="ops-status-pending">Ausstehend</span></td>'
+        +'</tr>';
     });
-
-    ops.forEach((op, i) => {
-      html += `<tr id="twOpsRow_${op.id}" class="${op.status}">
-        <td>${i+1}</td>
-        <td>${op.type === 'fake' ? '<span style="color:#888">(F)</span>' : '<b>(R)</b>'}</td>
-        <td style="text-align:left;" title="${op.originCoord}">${op.originVillage}</td>
-        <td style="text-align:left;" title="${op.targetCoord}">${op.targetName}</td>
-        <td id="twOpsTroops_${op.id}">${buildTroopCell(op)}</td>
-        <td style="white-space:nowrap;">${fmt(op.departTs)}</td>
-        <td style="white-space:nowrap;">${fmt(op.arriveTs)}</td>
-        <td><span id="twOpsCd_${op.id}" class="ops-countdown">--</span></td>
-        <td><span id="twOpsSt_${op.id}" class="ops-status-pending">Ausstehend</span></td>
-      </tr>`;
-    });
-
-    html += '</table>';
-    return html;
+    return h + '</table>';
   };
 
-  // ── TICKER ─────────────────────────────────────────────────────────────────
+  // TICKER
   let tickInterval = null;
-
   const startTicker = (ops) => {
     clearInterval(tickInterval);
     tickInterval = setInterval(() => {
       let now = serverNow();
-
       ops.forEach(op => {
         if (op.status !== 'pending') return;
         let diff = Math.round((op.departTs - now) / 1000);
         let cdEl  = document.getElementById('twOpsCd_'  + op.id);
         let rowEl = document.getElementById('twOpsRow_' + op.id);
         if (!cdEl) return;
-
         if (diff > 0) {
-          let h = Math.floor(diff / 3600);
-          let m = Math.floor((diff % 3600) / 60);
-          let s = diff % 60;
-          cdEl.textContent = (h > 0 ? h + 'h ' : '')
-            + (m > 0 || h > 0 ? String(m).padStart(2,'0') + 'm ' : '')
-            + String(s).padStart(2,'0') + 's';
-          if (diff <= 60 && rowEl) rowEl.className = 'imminent';
-        } else {
-          cdEl.textContent = 'Sendet...';
-        }
+          let hh=Math.floor(diff/3600), mm=Math.floor((diff%3600)/60), ss=diff%60;
+          cdEl.textContent = (hh>0?hh+'h ':'') + (mm>0||hh>0?String(mm).padStart(2,'0')+'m ':'') + String(ss).padStart(2,'0')+'s';
+          if (diff<=60 && rowEl) rowEl.className='imminent';
+        } else { cdEl.textContent='Sendet...'; }
       });
-
       updateSummary(ops);
-
-      if (ops.every(o => o.status !== 'pending')) {
-        clearInterval(tickInterval);
-        updateSummary(ops, true);
-      }
+      if (ops.every(o => o.status!=='pending')) { clearInterval(tickInterval); updateSummary(ops,true); }
     }, 1000);
   };
 
-  // ── SUMMARY ────────────────────────────────────────────────────────────────
   const updateSummary = (ops, done) => {
-    let p = ops.filter(o => o.status === 'pending').length;
-    let s = ops.filter(o => o.status === 'sent').length;
-    let e = ops.filter(o => o.status === 'error').length;
-    let mi = ops.filter(o => o.status === 'missed').length;
+    let p=ops.filter(o=>o.status==='pending').length, s=ops.filter(o=>o.status==='sent').length,
+        e=ops.filter(o=>o.status==='error').length, mi=ops.filter(o=>o.status==='missed').length;
     $('#twOpsSummary').show().html(
-      (done ? '<b>Abgeschlossen.</b> ' : '<b>Aktiv</b> -- ') +
-      'Ausstehend: <b>' + p + '</b> | ' +
-      'Gesendet: <b style="color:#155724">' + s + '</b> | ' +
-      'Fehler: <b style="color:#721c24">' + e + '</b>' +
-      (mi ? ' | Verpasst: <b style="color:#856404">' + mi + '</b>' : '')
+      (done?'<b>Abgeschlossen.</b> ':'<b>Aktiv</b> -- ')
+      +'Ausstehend: <b>'+p+'</b> | Gesendet: <b style="color:#155724">'+s+'</b> | Fehler: <b style="color:#721c24">'+e+'</b>'
+      +(mi?' | Verpasst: <b style="color:#856404">'+mi+'</b>':'')
     );
   };
 
-  // ── SCHEDULER ──────────────────────────────────────────────────────────────
   const scheduleAll = (ops) => {
     let now = serverNow();
     ops.forEach(op => {
       let ms = op.departTs - now;
       if (ms < -5000) {
-        op.status = 'missed';
-        let stEl  = document.getElementById('twOpsSt_'  + op.id);
-        let cdEl  = document.getElementById('twOpsCd_'  + op.id);
-        let rowEl = document.getElementById('twOpsRow_' + op.id);
-        if (stEl)  { stEl.textContent = 'Verpasst'; stEl.className = 'ops-status-missed'; }
-        if (cdEl)  cdEl.textContent = '';
-        if (rowEl) rowEl.className = 'missed';
+        op.status='missed';
+        let s=document.getElementById('twOpsSt_'+op.id), c=document.getElementById('twOpsCd_'+op.id), r=document.getElementById('twOpsRow_'+op.id);
+        if(s){s.textContent='Verpasst';s.className='ops-status-missed';} if(c)c.textContent=''; if(r)r.className='missed';
         return;
       }
       if (ms < 0) ms = 0;
@@ -475,136 +341,81 @@
   const cancelAll = (ops) => {
     ops.forEach(op => {
       if (op.timerId) clearTimeout(op.timerId);
-      if (op.status === 'pending') {
-        op.status = 'missed';
-        let stEl  = document.getElementById('twOpsSt_'  + op.id);
-        let rowEl = document.getElementById('twOpsRow_' + op.id);
-        if (stEl)  { stEl.textContent = 'Abgebrochen'; stEl.className = 'ops-status-missed'; }
-        if (rowEl) rowEl.className = 'missed';
+      if (op.status==='pending') {
+        op.status='missed';
+        let s=document.getElementById('twOpsSt_'+op.id), r=document.getElementById('twOpsRow_'+op.id);
+        if(s){s.textContent='Abgebrochen';s.className='ops-status-missed';} if(r)r.className='missed';
       }
     });
     clearInterval(tickInterval);
   };
 
-  // ── TRUPPEN AUS TABELLE LESEN ──────────────────────────────────────────────
   const readTroopsFromTable = (ops) => {
     ops.forEach(op => {
       UNITS.forEach(u => {
-        let input = document.querySelector(
-          'input.ops-troop-input[data-op="' + op.id + '"][data-unit="' + u.key + '"]'
-        );
+        let input = document.querySelector('input.ops-troop-input[data-op="'+op.id+'"][data-unit="'+u.key+'"]');
         if (!input) return;
-        let val = input.value.trim();
-        let ph  = input.placeholder;
-        if (!val && ph === 'alle') {
-          op.troops[u.key] = 'all';
-        } else if (!val || val === '0') {
-          delete op.troops[u.key];
-        } else {
-          op.troops[u.key] = val;
-        }
+        let val=input.value.trim(), ph=input.placeholder;
+        if (!val && ph==='alle') { op.troops[u.key]='all'; }
+        else if (!val || val==='0') { delete op.troops[u.key]; }
+        else { op.troops[u.key]=val; }
       });
     });
   };
 
-  // ── INIT ───────────────────────────────────────────────────────────────────
+  // INIT
   const init = () => {
     initServerOffset();
-
-    let ui = buildCSS() + `
-      <div id="twOpsBox">
-        <h3>⚔ Operation Scheduler</h3>
-        <textarea id="twOpsInput" placeholder="DS-Ultimate Export hier einfügen (Tab-getrennt)..."></textarea>
-        <div class="ops-toolbar">
-          <input type="button" id="twOpsLoad"   class="btn" value="Operationen laden">
-          <input type="button" id="twOpsStart"  class="btn" value="▶ Starten" disabled style="background:#2a7;color:#fff;">
-          <input type="button" id="twOpsCancel" class="btn" value="■ Abbrechen" disabled style="background:#c44;color:#fff;">
-          <span style="font-size:10px;color:#888;">Truppen in der Tabelle eintragen, dann Starten klicken.</span>
-        </div>
-        <div id="twOpsSummary" style="display:none;"></div>
-        <div id="twOpsTable"></div>
-      </div>`;
+    let ui = buildCSS()
+      + '<div id="twOpsBox"><h3>Operation Scheduler v3</h3>'
+      + '<textarea id="twOpsInput" placeholder="DS-Ultimate Export einfügen..."></textarea>'
+      + '<div class="ops-toolbar">'
+      + '<input type="button" id="twOpsLoad" class="btn" value="Laden">'
+      + '<input type="button" id="twOpsStart" class="btn" value="Starten" disabled style="background:#2a7;color:#fff;">'
+      + '<input type="button" id="twOpsCancel" class="btn" value="Abbrechen" disabled style="background:#c44;color:#fff;">'
+      + '<span style="font-size:10px;color:#888">Truppen eintragen, dann Starten.</span>'
+      + '</div><div id="twOpsSummary" style="display:none"></div>'
+      + '<div id="twOpsTable"></div></div>';
 
     Dialog.show('TWOps', ui);
-
     let currentOps = [];
-
-    // Eigene Dörfer vorab laden (für Origin-ID Ermittlung)
     loadOwnVillages();
 
-    // Operationen laden -- nur parsen und Tabelle zeigen, noch nicht planen
     $('#twOpsLoad').on('click', function () {
       let raw = $('#twOpsInput').val().trim();
       if (!raw) { UI.ErrorMessage('Bitte Export einfügen.'); return; }
-
-      currentOps.forEach(op => { if (op.timerId) clearTimeout(op.timerId); });
+      currentOps.forEach(op => { if(op.timerId) clearTimeout(op.timerId); });
       clearInterval(tickInterval);
-
       currentOps = parseExport(raw);
       $('#twOpsTable').html(buildTable(currentOps));
-
       if (!currentOps.length) return;
-
-      // Event: ∞-Button setzt Placeholder auf "alle"
       $(document).off('click.opsAll').on('click.opsAll', '.ops-all-btn', function () {
-        let opId   = $(this).data('op');
-        let unit   = $(this).data('unit');
-        let input  = $('input.ops-troop-input[data-op="' + opId + '"][data-unit="' + unit + '"]');
-        input.val('').attr('placeholder', 'alle');
+        let oid=$(this).data('op'), unit=$(this).data('unit');
+        $('input.ops-troop-input[data-op="'+oid+'"][data-unit="'+unit+'"]').val('').attr('placeholder','alle');
       });
-
       $('#twOpsStart').prop('disabled', false);
       $('#twOpsCancel').prop('disabled', true);
-
-      let missed = currentOps.filter(o => {
-        let ms = o.departTs - serverNow();
-        return ms < -5000;
-      }).length;
-
-      UI.SuccessMessage(
-        currentOps.length + ' Operationen geladen' +
-        (missed ? ' (' + missed + ' bereits verpasst)' : '') +
-        '. Truppen eintragen, dann Starten klicken.'
-      );
+      UI.SuccessMessage(currentOps.length + ' Operationen geladen.');
     });
 
-    // Starten -- Truppen aus Tabelle lesen, dann schedulen
     $('#twOpsStart').on('click', function () {
       if (!currentOps.length) return;
-
       readTroopsFromTable(currentOps);
-
-      // Prüfen ob mindestens eine Op Truppen hat
-      let noTroops = currentOps.filter(o =>
-        o.status === 'pending' && Object.keys(o.troops).length === 0
-      );
-      if (noTroops.length === currentOps.filter(o => o.status === 'pending').length) {
-        UI.ErrorMessage('Bitte mindestens eine Einheit pro Operation eintragen!');
-        return;
-      }
-
+      let pending = currentOps.filter(o => o.status==='pending');
+      if (pending.every(o => !Object.keys(o.troops).length)) { UI.ErrorMessage('Bitte Truppen eintragen!'); return; }
       scheduleAll(currentOps);
       startTicker(currentOps);
       updateSummary(currentOps);
-
-      $('#twOpsStart').prop('disabled', true);
+      $(this).prop('disabled', true);
       $('#twOpsCancel').prop('disabled', false);
-
-      // Truppenfelder sperren damit nichts mehr geändert wird
-      $('input.ops-troop-input').prop('disabled', true);
-      $('.ops-all-btn').prop('disabled', true);
-
-      let pending = currentOps.filter(o => o.status === 'pending').length;
-      UI.SuccessMessage(pending + ' Angriffe geplant und aktiv.');
+      $('input.ops-troop-input, .ops-all-btn').prop('disabled', true);
+      UI.SuccessMessage(pending.length + ' Angriffe geplant.');
     });
 
-    // Abbrechen
     $('#twOpsCancel').on('click', function () {
       cancelAll(currentOps);
       $(this).prop('disabled', true);
-      $('input.ops-troop-input').prop('disabled', false);
-      $('.ops-all-btn').prop('disabled', false);
-      UI.ErrorMessage('Alle ausstehenden Operationen abgebrochen.');
+      $('input.ops-troop-input, .ops-all-btn').prop('disabled', false);
     });
   };
 
