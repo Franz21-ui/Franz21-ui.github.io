@@ -28,26 +28,26 @@
   };
 
   // ── SERVER-ZEIT SYNC ───────────────────────────────────────────────────────
-  // Liest die angezeigte Serverzeit und berechnet den Offset zur lokalen Zeit
-  // So bleibt der Timer auch bei PC-Zeitabweichungen korrekt
-  const getServerOffset = function () {
+  // Offset einmalig beim Laden cachen -- nicht jede Sekunde neu parsen
+  let _serverOffset = 0;
+  const initServerOffset = function () {
     try {
       let text = $('#serverTime').closest('p').text();
       let m = text.match(/(\d+):(\d+):(\d+)/);
       let dm = text.match(/(\d+)\.(\d+)\.(\d+)/);
-      if (!m || !dm) return 0;
-      let serverNow = new Date(
+      if (!m || !dm) return;
+      let serverTs = new Date(
         parseInt(dm[3]), parseInt(dm[2]) - 1, parseInt(dm[1]),
         parseInt(m[1]), parseInt(m[2]), parseInt(m[3])
       ).getTime();
-      return serverNow - Date.now();
+      _serverOffset = serverTs - Date.now();
     } catch (e) {
-      return 0;
+      _serverOffset = 0;
     }
   };
 
   const serverNow = function () {
-    return Date.now() + getServerOffset();
+    return Date.now() + _serverOffset;
   };
 
   // ── PARSER ─────────────────────────────────────────────────────────────────
@@ -240,9 +240,10 @@
           }
         } else if (op.status === 'sent') { sent++; }
         else if (op.status === 'error') { errors++; }
-
-        updateSummary(ops);
       });
+
+      // Bug 2 fix: updateSummary einmal pro Tick, nicht pro Element
+      updateSummary(ops);
 
       // Ticker stoppen wenn alle durch
       let allDone = ops.every(op => op.status !== 'pending');
@@ -270,69 +271,49 @@
   };
 
   // ── ANGRIFF SENDEN ─────────────────────────────────────────────────────────
-  // Baut den Angriffs-POST direkt gegen den Place-Screen
+  // Bug 3 fix: keine nicht-existierende get_villages API mehr
+  // Bug 4 fix: korrekte Truppenfelder per input[name=unit]
+  // Bug 5 fix: trim() auf Koordinaten-Splits
   const sendAttack = function (op) {
     let stEl = document.getElementById('twOpsSt_' + op.id);
     let cdEl = document.getElementById('twOpsCd_' + op.id);
     let rowEl = document.getElementById('twOpsRow_' + op.id);
 
-    // Ziel-Village-ID aus der Karte holen
-    let targetX = op.targetCoord.replace(/[()]/g, '').split('|')[0];
-    let targetY = op.targetCoord.replace(/[()]/g, '').split('|')[1];
-    let originX = op.originCoord.replace(/[()]/g, '').split('|')[0];
-    let originY = op.originCoord.replace(/[()]/g, '').split('|')[1];
+    // Koordinaten sauber extrahieren (Bug 5: trim)
+    let coords = op.originCoord.replace(/[()]/g, '');
+    let originX = coords.split('|')[0].trim();
+    let originY = coords.split('|')[1].trim();
+    let tcoords = op.targetCoord.replace(/[()]/g, '');
+    let targetX = tcoords.split('|')[0].trim();
+    let targetY = tcoords.split('|')[1].trim();
 
-    // Village-IDs per API ermitteln
-    $.get(TribalWars.buildURL('GET', 'get_villages', {
-      x: targetX, y: targetY
-    })).then(function (data) {
-      // Fallback: direkt über map/village.txt Koordinaten -> ID
-      // Da get_villages nicht immer verfügbar, bauen wir den Link manuell
-      let targetId = null;
-      let originId = null;
+    // Bug 3 fix: Origin-Village-ID direkt aus game_data holen
+    // game_data.village = aktuelles Dorf, game_data.villages = alle eigenen Doerfer
+    let originId = null;
+    if (game_data.villages) {
+      game_data.villages.forEach(function (v) {
+        if (String(v.x) === originX && String(v.y) === originY) originId = v.id;
+      });
+    }
+    // Fallback: aktuelles Dorf nutzen
+    if (!originId) originId = game_data.village;
 
-      // Aus game_data.villages die IDs holen
-      if (game_data.villages) {
-        game_data.villages.forEach(function (v) {
-          if (v.x == originX && v.y == originY) originId = v.id;
-        });
-      }
-
-      // Village per overview_villages suchen falls nicht gefunden
-      if (!originId) {
-        // Koordinaten direkt im DOM suchen
-        $('[data-x="' + originX + '"][data-y="' + originY + '"]').each(function () {
-          originId = $(this).data('id') || originId;
-        });
-      }
-
-      doSendAttack(op, originId, targetX, targetY, stEl, cdEl, rowEl);
-    }).fail(function () {
-      doSendAttack(op, null, targetX, targetY, stEl, cdEl, rowEl);
-    });
-  };
-
-  const doSendAttack = function (op, originId, targetX, targetY, stEl, cdEl, rowEl) {
-    // Aufbau: Truppenversammlung -> Bestätigung -> Senden
-    // Schritt 1: Truppenversammlung aufrufen mit Zielkoordinaten
+    // Schritt 1: Place-Screen des Herkunftsdorfes laden
     let placeUrl = TribalWars.buildURL('GET', 'place', {
       target_x: targetX,
       target_y: targetY,
-      attack: true
-    });
-
-    if (originId) {
-      placeUrl = placeUrl.replace(/village=\d+/, 'village=' + originId);
-    }
+      attack: '1'
+    }).replace(/village=\d+/, 'village=' + originId);
 
     $.get(placeUrl).then(function (html) {
       let $html = $(html);
-      // CSRF Token extrahieren
+
+      // CSRF Token
       let csrfToken = $html.find('input[name="h"]').val() ||
                       $html.find('input[name="ch"]').val() ||
                       game_data.csrf;
 
-      // Formular-Daten aufbauen
+      // Bug 4 fix: Truppenfelder per input[name=unit] lesen, nicht per ID
       let formData = {
         target_x: targetX,
         target_y: targetY,
@@ -340,17 +321,19 @@
         h: csrfToken,
       };
 
-      // Einheit eintragen -- Feld befüllen
       if (op.unit) {
-        // Maximale Truppen aus dem Formular lesen
-        let unitInput = $html.find('input#unit_input_' + op.unit);
-        let maxUnits = unitInput.attr('data-all-count') || unitInput.attr('max') || 1;
-        formData[op.unit] = maxUnits;
+        // Maximale verfuegbare Truppen lesen
+        let unitInput = $html.find('input[name="' + op.unit + '"]');
+        let maxUnits = unitInput.attr('data-all-count') ||
+                       unitInput.closest('td').find('.unit-input-all').text().replace(/\D/g, '') ||
+                       unitInput.attr('max') ||
+                       '0';
+        formData[op.unit] = String(parseInt(maxUnits) || 0);
       }
 
-      // Schritt 2: Angriff bestätigen
-      let confirmUrl = TribalWars.buildURL('POST', 'place', {});
-      if (originId) confirmUrl = confirmUrl.replace(/village=\d+/, 'village=' + originId);
+      // Schritt 2: Bestaetigung anfordern
+      let confirmUrl = TribalWars.buildURL('POST', 'place', {})
+        .replace(/village=\d+/, 'village=' + originId);
 
       $.post(confirmUrl, formData).then(function (confirmHtml) {
         let $confirm = $(confirmHtml);
@@ -359,18 +342,19 @@
                            csrfToken;
         let confirmData = { h: confirmToken, attack: '1' };
 
-        // Alle hidden inputs aus dem Bestätigungsformular übernehmen
-        $confirm.find('form[name="command-data-form"] input[type="hidden"]').each(function () {
-          confirmData[$(this).attr('name')] = $(this).val();
+        // Alle hidden inputs aus Bestaetigungsformular uebernehmen
+        $confirm.find('form input[type="hidden"]').each(function () {
+          let n = $(this).attr('name');
+          if (n) confirmData[n] = $(this).val();
         });
 
-        // Schritt 3: Endgültiger POST
-        let sendUrl = TribalWars.buildURL('POST', 'place', { try: 'confirm' });
-        if (originId) sendUrl = sendUrl.replace(/village=\d+/, 'village=' + originId);
+        // Schritt 3: Endgueltiger POST
+        let sendUrl = TribalWars.buildURL('POST', 'place', { try: 'confirm' })
+          .replace(/village=\d+/, 'village=' + originId);
 
         $.post(sendUrl, confirmData).then(function () {
           op.status = 'sent';
-          if (stEl) { stEl.textContent = 'Gesendet'; stEl.className = 'ops-status-sent'; }
+          if (stEl) { stEl.textContent = 'Gesendet ✓'; stEl.className = 'ops-status-sent'; }
           if (cdEl) cdEl.textContent = '';
           if (rowEl) rowEl.className = 'sent';
           UI.SuccessMessage('Angriff gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
@@ -384,7 +368,7 @@
 
       }).fail(function () {
         op.status = 'error';
-        if (stEl) { stEl.textContent = 'Fehler (Bestätigung)'; stEl.className = 'ops-status-error'; }
+        if (stEl) { stEl.textContent = 'Fehler (Bestaetigung)'; stEl.className = 'ops-status-error'; }
         if (rowEl) rowEl.className = 'error';
       });
 
@@ -441,6 +425,7 @@
 
   // ── INIT ───────────────────────────────────────────────────────────────────
   const init = function () {
+    initServerOffset(); // Serverzeit-Offset einmalig berechnen
     if (!game_data.features.Premium || !game_data.features.Premium.active) {
       UI.ErrorMessage('Operation Scheduler benötigt einen Premium Account!');
       return;
