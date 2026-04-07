@@ -1,5 +1,4 @@
 // TW Operation Scheduler v3
-// Autor: Shop21 / W252
 
 (() => {
 
