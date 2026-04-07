@@ -148,12 +148,12 @@
 
     setStatus('Lade...', 'pending', 'imminent');
 
-    // Schritt 1: Place-Screen laden
+    // Schritt 1: Place-Screen laden um CSRF-Token und Truppenzahlen zu lesen
     $.get('/game.php?village=' + originId + '&screen=place&x=' + targetX + '&y=' + targetY)
       .then(function (html) {
         let $html = $(html);
 
-        // CSRF: erstes unbekanntes hidden input
+        // CSRF-Token: dynamischer Feldname -- erstes unbekanntes hidden input
         let csrfName = null, csrfVal = null;
         $html.find('input[type="hidden"]').each(function () {
           let n = $(this).attr('name') || '';
@@ -163,8 +163,14 @@
         });
         console.log('[TWOps] CSRF:', csrfName, '=', csrfVal);
 
-        // Formular aufbauen
-        let formData = { x: targetX, y: targetY, attack: 'Angreifen', source_village: String(originId) };
+        // Formular aufbauen -- exakt wie echter Browser-Submit
+        let formData = {
+          x: targetX,
+          y: targetY,
+          target_type: 'coord',
+          attack: 'Angreifen',
+          source_village: String(originId),
+        };
         if (csrfName) formData[csrfName] = csrfVal;
 
         let hasUnits = false;
@@ -178,48 +184,29 @@
           if (count > 0) { formData[u.key] = String(count); hasUnits = true; }
         });
 
-        if (!hasUnits) { setStatus('Keine Truppen verfuegbar', 'error', 'error'); op.status='error'; return; }
+        if (!hasUnits) { setStatus('Keine Truppen', 'error', 'error'); op.status='error'; return; }
 
-        console.log('[TWOps] POST Schritt 1:', JSON.stringify(formData));
+        console.log('[TWOps] Sende auf try=confirm:', JSON.stringify(formData));
 
-        // Schritt 2: POST -> Bestaetigung
-        $.post('/game.php?village=' + originId + '&screen=place', formData)
-          .then(function (confirmHtml) {
-            let $c = $(confirmHtml);
-            let forms = $c.find('form').map(function(){ return $(this).attr('name')||$(this).attr('id')||'?'; }).get();
-            let err   = $c.find('.error_box,.system_wide_message').text().trim();
-            console.log('[TWOps] Schritt2 - Formulare:', forms, '| Fehler:', err);
+        // Einziger POST direkt auf try=confirm -- genau wie echter Browser
+        $.post('/game.php?village=' + originId + '&screen=place&try=confirm', formData)
+          .then(function (result) {
+            let $r = $(result);
+            let err = $r.find('.error_box, .system_wide_message').text().trim();
+            let h2  = $r.find('h2').first().text().trim();
+            console.log('[TWOps] Ergebnis H2:', h2, '| Fehler:', err);
 
-            if (err) { setStatus('Fehler: '+err.substring(0,30), 'error','error'); op.status='error'; return; }
-
-            let confirmForm = $c.find('form[name="command-data-form"]');
-            if (!confirmForm.length) {
-              // Kein Bestaetigunsformular
-              console.log('[TWOps] Kein command-data-form. Inputs:', $c.find('input').map(function(){ return $(this).attr('name')+'='+$(this).val(); }).get());
-              setStatus('Gesendet?', 'sent', 'sent'); op.status='sent'; return;
+            if (err) {
+              setStatus('Fehler: ' + err.substring(0,30), 'error', 'error');
+              op.status = 'error';
+              UI.ErrorMessage('Fehler: ' + err.substring(0,80));
+              return;
             }
-
-            let confirmData = {};
-            confirmForm.find('input').each(function () {
-              let n=$(this).attr('name'), v=$(this).val(), t=$(this).attr('type')||'';
-              if (n && t !== 'submit') confirmData[n] = v;
-            });
-            confirmData['attack'] = 'Angreifen';
-            console.log('[TWOps] POST Schritt 2:', JSON.stringify(confirmData));
-
-            // Schritt 3
-            $.post('/game.php?village=' + originId + '&screen=place&try=confirm', confirmData)
-              .then(function (result) {
-                let e2 = $(result).find('.error_box,.system_wide_message').text().trim();
-                console.log('[TWOps] Schritt3 Fehler:', e2);
-                if (e2) { setStatus('Fehler Final', 'error','error'); op.status='error'; return; }
-                setStatus('Gesendet OK', 'sent', 'sent');
-                op.status = 'sent';
-                UI.SuccessMessage('Gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
-              })
-              .fail(function(){ setStatus('Fehler Senden', 'error','error'); op.status='error'; });
-
-          }).fail(function(){ setStatus('Fehler POST', 'error','error'); op.status='error'; });
+            setStatus('Gesendet OK', 'sent', 'sent');
+            op.status = 'sent';
+            UI.SuccessMessage('Gesendet: ' + op.originCoord + ' -> ' + op.targetCoord);
+          })
+          .fail(function(){ setStatus('Fehler POST', 'error','error'); op.status='error'; });
 
       }).fail(function(){ setStatus('Fehler Place', 'error','error'); op.status='error'; });
   };
