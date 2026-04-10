@@ -1974,9 +1974,12 @@ window.twSDK = {
             jQuery(this).addClass('btn-confirm-yes');
             jQuery('#raLandingTime').val(noblesLandingTime);
 
-            const noblesLandingTimeObject = new Date(
-                noblesLandingTime
-            ).getTime();
+            const noblesLandingTimeObject = parseGermanDateTime(noblesLandingTime);
+            if (isNaN(noblesLandingTimeObject)) {
+                UI.ErrorMessage(twSDK.tt('There was an error!'));
+                console.error(`${scriptInfo} Invalid date format: "${noblesLandingTime}". Expected DD.MM.YY HH:MM:SS`);
+                return;
+            }
 
             const arrivalTime = getArrivalTimeDifference();
             const difference =
@@ -2005,6 +2008,17 @@ window.twSDK = {
         });
     }
 
+    // Helper: Parse German date format DD.MM.YY HH:MM:SS into a timestamp
+    // JavaScript's Date() interprets "10.04.26" as MM.DD.YY (Oktober 4) statt DD.MM.YY (10. April)
+    function parseGermanDateTime(str) {
+        str = str.trim();
+        const match = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})\s+(\d{2}:\d{2}:\d{2})$/);
+        if (!match) return NaN;
+        const [, day, month, year] = match;
+        const fullYear = year.length === 2 ? '20' + year : year;
+        return new Date(`${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${match[4]}`).getTime();
+    }
+
     // Helper: Get duration time
     function getArrivalTimeDifference() {
         let cats = 5;
@@ -2030,7 +2044,7 @@ window.twSDK = {
         let arrival = table[0].rows[cats + 1].cells[1].innerHTML
             .split('"')[0]
             .split('<')[0];
-        let arrivalTimeObject = new Date(arrival).getTime();
+        let arrivalTimeObject = parseGermanDateTime(arrival);
         let arrivalTimeDifference = arrivalTimeObject - duration;
 
         return arrivalTimeDifference;
