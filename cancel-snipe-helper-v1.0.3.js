@@ -1872,6 +1872,10 @@ window.twSDK = {
     const scriptInfo = twSDK.scriptInfo();
     const isValidScreen = twSDK.checkValidLocation('screen');
 
+    // Auto-Cancel state
+    let scheduledCancelTimestamp = null;
+    let autoCancelExecuted = false;
+
     // Entry point
     if (isValidScreen) {
         try {
@@ -1914,6 +1918,13 @@ window.twSDK = {
                             'Cancel In:'
                         )}</b> <span id="raSnipeCancelIn" class="timer ra-cancel-snipe-cancel-time"></span>
                     </div>
+                    <div class="ra-mb15 ra-auto-cancel-row">
+                        <label for="raAutoCancel" class="ra-auto-cancel-label">
+                            <input type="checkbox" id="raAutoCancel">
+                            Auto-Cancel aktivieren
+                        </label>
+                        <div id="raAutoCancelStatus" class="ra-auto-cancel-status" style="display:none;"></div>
+                    </div>
                 </div>
                 <div class="ra-mb15">
                     <a href="javascript:void(0);" id="raCalculateCancelSnipeBtn" class="btn">
@@ -1929,6 +1940,12 @@ window.twSDK = {
                 .ra-cancel-snipe-time { color: #3236a8; }
                 .ra-cancel-snipe-cancel-time { color: #ff0000; }
                 .ra-cancel-snipe-helper .btn-confirm-yes { padding: 3px; }
+                .ra-auto-cancel-label { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; margin-bottom: 0; }
+                .ra-auto-cancel-label input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+                .ra-auto-cancel-status { margin-top: 6px; padding: 5px 8px; border-radius: 3px; font-size: 13px; font-weight: 600; }
+                .ra-auto-cancel-status.waiting  { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+                .ra-auto-cancel-status.warn     { background: #ffe0b2; color: #e65100; border: 1px solid #ff9800; }
+                .ra-auto-cancel-status.fired    { background: #d4edda; color: #155724; border: 1px solid #28a745; }
             `;
 
         jQuery(window.TribalWars).on('global_tick', function () {
@@ -1936,6 +1953,33 @@ window.twSDK = {
             const formattedServerTime = getFormattedCancelTime(serverDateTime);
             jQuery('#raServerTime').text(formattedServerTime);
             Timing.tickHandlers.timers.init();
+
+            // Auto-Cancel: prüfen ob Cancel-Zeit erreicht
+            if (
+                scheduledCancelTimestamp !== null &&
+                !autoCancelExecuted &&
+                jQuery('#raAutoCancel').is(':checked')
+            ) {
+                const remainingMs = scheduledCancelTimestamp - serverDateTime;
+
+                if (remainingMs <= 0) {
+                    autoCancelExecuted = true;
+                    executeCancelCommand();
+                } else if (remainingMs <= 10000) {
+                    // letzte 10 Sekunden: orangene Warnung
+                    jQuery('#raAutoCancelStatus')
+                        .removeClass('waiting')
+                        .addClass('warn')
+                        .text(`Auto-Cancel in ${Math.ceil(remainingMs / 1000)}s ...`)
+                        .show();
+                } else {
+                    jQuery('#raAutoCancelStatus')
+                        .removeClass('warn fired')
+                        .addClass('waiting')
+                        .text('Auto-Cancel ist aktiv — wartet auf Cancel-Zeit')
+                        .show();
+                }
+            }
         });
 
         setTimeout(function () {
@@ -1997,15 +2041,74 @@ window.twSDK = {
             if (cancelIn > 0) {
                 let formattedCancelIn = twSDK.secondsToHms(cancelIn / 1000);
 
+                // Auto-Cancel state zurücksetzen für neue Berechnung
+                scheduledCancelTimestamp = cancelTimeObject.getTime();
+                autoCancelExecuted = false;
+                jQuery('#raAutoCancelStatus')
+                    .removeClass('warn fired')
+                    .addClass('waiting')
+                    .text('Auto-Cancel ist aktiv — wartet auf Cancel-Zeit')
+                    .hide();
+
                 jQuery('#raSnipeTime').show();
                 jQuery('#raSnipeTimeInput').text(formattedCancelTime);
                 jQuery('#raSnipeCancelIn').text(formattedCancelIn);
+
+                // Status-Box nur zeigen wenn Checkbox bereits aktiviert
+                if (jQuery('#raAutoCancel').is(':checked')) {
+                    jQuery('#raAutoCancelStatus').show();
+                }
+
+                // Checkbox: Status-Box ein-/ausblenden
+                jQuery('#raAutoCancel').off('change').on('change', function () {
+                    if (jQuery(this).is(':checked')) {
+                        jQuery('#raAutoCancelStatus').show();
+                    } else {
+                        jQuery('#raAutoCancelStatus').hide();
+                    }
+                });
 
                 Timing.tickHandlers.timers.init();
             } else {
                 UI.ErrorMessage(twSDK.tt('Cancel snipe is not possible!'));
             }
         });
+    }
+
+    // Action: Führt den Abbrechen-Link auf der Seite aus
+    function executeCancelCommand() {
+        // Suche nach dem "abbrechen"-Link via action=cancel oder Text-Inhalt
+        let cancelLink = jQuery('a[href*="action=cancel"]').first();
+
+        if (!cancelLink.length) {
+            // Fallback: Link mit Text "abbrechen" suchen
+            cancelLink = jQuery('a').filter(function () {
+                return jQuery(this).text().trim().toLowerCase() === 'abbrechen';
+            }).first();
+        }
+
+        if (cancelLink.length) {
+            jQuery('#raAutoCancelStatus')
+                .removeClass('waiting warn')
+                .addClass('fired')
+                .text('Auto-Cancel ausgeführt!')
+                .show();
+
+            console.log(`${scriptInfo} Auto-Cancel: Navigiere zu`, cancelLink.attr('href'));
+
+            // Kurze Verzögerung damit der Status sichtbar wird, dann navigieren
+            setTimeout(function () {
+                window.location.href = cancelLink.attr('href');
+            }, 300);
+        } else {
+            autoCancelExecuted = false; // Retry erlauben
+            jQuery('#raAutoCancelStatus')
+                .removeClass('waiting warn fired')
+                .addClass('warn')
+                .text('Fehler: Abbrechen-Link nicht gefunden!')
+                .show();
+            console.error(`${scriptInfo} Auto-Cancel: Kein Abbrechen-Link (action=cancel) auf der Seite gefunden.`);
+        }
     }
 
     // Helper: Parse German date format DD.MM.YY HH:MM:SS into a timestamp
