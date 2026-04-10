@@ -1916,7 +1916,7 @@ window.twSDK = {
                         )}</b> <span id="raSnipeTimeInput" class="ra-cancel-snipe-time"></span><br>
                         <b>${twSDK.tt(
                             'Cancel In:'
-                        )}</b> <span id="raSnipeCancelIn" class="timer ra-cancel-snipe-cancel-time"></span>
+                        )}</b> <span id="raSnipeCancelIn" class="ra-cancel-snipe-cancel-time"></span>
                     </div>
                     <div class="ra-mb15 ra-auto-cancel-row">
                         <label for="raAutoCancel" class="ra-auto-cancel-label">
@@ -1952,32 +1952,37 @@ window.twSDK = {
             const serverDateTime = Timing.getCurrentServerTime();
             const formattedServerTime = getFormattedCancelTime(serverDateTime);
             jQuery('#raServerTime').text(formattedServerTime);
-            Timing.tickHandlers.timers.init();
 
-            // Auto-Cancel: prüfen ob Cancel-Zeit erreicht
-            if (
-                scheduledCancelTimestamp !== null &&
-                !autoCancelExecuted &&
-                jQuery('#raAutoCancel').is(':checked')
-            ) {
+            // Countdown manuell aktualisieren (nicht TW's timer-Klasse nutzen —
+            // die bricht bei Dezimalwerten und dynamisch eingefügten Elementen)
+            if (scheduledCancelTimestamp !== null) {
                 const remainingMs = scheduledCancelTimestamp - serverDateTime;
-
-                if (remainingMs <= 0) {
-                    autoCancelExecuted = true;
-                    executeCancelCommand();
-                } else if (remainingMs <= 10000) {
-                    // letzte 10 Sekunden: orangene Warnung
-                    jQuery('#raAutoCancelStatus')
-                        .removeClass('waiting')
-                        .addClass('warn')
-                        .text(`Auto-Cancel in ${Math.ceil(remainingMs / 1000)}s ...`)
-                        .show();
+                if (remainingMs > 0) {
+                    jQuery('#raSnipeCancelIn').text(
+                        twSDK.secondsToHms(Math.floor(remainingMs / 1000))
+                    );
                 } else {
-                    jQuery('#raAutoCancelStatus')
-                        .removeClass('warn fired')
-                        .addClass('waiting')
-                        .text('Auto-Cancel ist aktiv — wartet auf Cancel-Zeit')
-                        .show();
+                    jQuery('#raSnipeCancelIn').text('00:00:00');
+                }
+
+                // Auto-Cancel: prüfen ob Cancel-Zeit erreicht
+                if (!autoCancelExecuted && jQuery('#raAutoCancel').is(':checked')) {
+                    if (remainingMs <= 0) {
+                        autoCancelExecuted = true;
+                        executeCancelCommand();
+                    } else if (remainingMs <= 10000) {
+                        jQuery('#raAutoCancelStatus')
+                            .removeClass('waiting')
+                            .addClass('warn')
+                            .text(`Auto-Cancel in ${Math.ceil(remainingMs / 1000)}s ...`)
+                            .show();
+                    } else {
+                        jQuery('#raAutoCancelStatus')
+                            .removeClass('warn fired')
+                            .addClass('waiting')
+                            .text('Auto-Cancel ist aktiv — wartet auf Cancel-Zeit')
+                            .show();
+                    }
                 }
             }
         });
@@ -2039,7 +2044,7 @@ window.twSDK = {
                 cancelTimeObject.getTime() - serverTimeObject.getTime();
 
             if (cancelIn > 0) {
-                let formattedCancelIn = twSDK.secondsToHms(cancelIn / 1000);
+                let formattedCancelIn = twSDK.secondsToHms(Math.floor(cancelIn / 1000));
 
                 // Auto-Cancel state zurücksetzen für neue Berechnung
                 scheduledCancelTimestamp = cancelTimeObject.getTime();
@@ -2052,7 +2057,7 @@ window.twSDK = {
 
                 jQuery('#raSnipeTime').show();
                 jQuery('#raSnipeTimeInput').text(formattedCancelTime);
-                jQuery('#raSnipeCancelIn').text(formattedCancelIn);
+                jQuery('#raSnipeCancelIn').text(formattedCancelIn); // wird ab jetzt durch global_tick aktualisiert
 
                 // Status-Box nur zeigen wenn Checkbox bereits aktiviert
                 if (jQuery('#raAutoCancel').is(':checked')) {
@@ -2068,7 +2073,6 @@ window.twSDK = {
                     }
                 });
 
-                Timing.tickHandlers.timers.init();
             } else {
                 UI.ErrorMessage(twSDK.tt('Cancel snipe is not possible!'));
             }
