@@ -101,35 +101,68 @@ function applyTheme(name) {
 
 const CSS = () => `
 <style id="rbpro_css">
-.rbpro-container { position:fixed; width:52%; min-width:400px; background:${T.bg};
-    border:2px solid ${T.border}; border-radius:6px; color:${T.text};
-    font-family:Arial,sans-serif; font-size:13px; z-index:99999; top:60px; left:24%; }
-.rbpro-header { background:${T.header}; padding:8px 12px; border-radius:4px 4px 0 0;
-    display:flex; align-items:center; justify-content:space-between; cursor:move; }
-.rbpro-header h2 { margin:0; font-size:15px; color:${T.text}; }
-.rbpro-body { padding:10px; max-height:620px; overflow-y:auto; }
-.rbpro-footer { background:${T.header}; padding:4px 12px; border-radius:0 0 4px 4px;
-    font-size:11px; color:${T.text}; opacity:.7; }
-.rbpro-table { width:100%; border-collapse:collapse; margin:6px 0; }
-.rbpro-table td, .rbpro-table th { padding:4px 6px; border:1px solid ${T.border}; }
+/* ── Mobile-first base ───────────────────────────────────── */
+.rbpro-container {
+    position:fixed; top:4px; left:2vw; width:96vw;
+    background:${T.bg}; border:2px solid ${T.border}; border-radius:6px;
+    color:${T.text}; font-family:Arial,sans-serif; font-size:13px;
+    z-index:99999; display:flex; flex-direction:column; max-height:92vh; }
+.rbpro-header {
+    background:${T.header}; padding:8px 10px; border-radius:4px 4px 0 0;
+    display:flex; align-items:center; justify-content:space-between;
+    cursor:move; flex-shrink:0; }
+.rbpro-header h2 { margin:0; font-size:14px; color:${T.text}; }
+.rbpro-body { padding:8px; overflow-y:auto; flex:1; min-height:0;
+    -webkit-overflow-scrolling:touch; }
+.rbpro-footer { background:${T.header}; padding:4px 10px; border-radius:0 0 4px 4px;
+    font-size:11px; color:${T.text}; opacity:.7; flex-shrink:0; }
+/* ── Tables ─────────────────────────────────────────────── */
+.rbpro-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; width:100%; }
+.rbpro-table { width:100%; border-collapse:collapse; margin:6px 0; min-width:280px; }
+.rbpro-table td, .rbpro-table th { padding:5px 6px; border:1px solid ${T.border};
+    white-space:nowrap; }
 .rbpro-table tr:nth-child(even) { background:${T.table}; }
 .rbpro-table tr:nth-child(odd)  { background:${T.inner}; }
 .rbpro-table th { background:${T.header}; color:${T.text}; }
+/* ── Settings rows (div-based, responsive) ──────────────── */
+.rbpro-cfg { width:100%; }
+.rbpro-cfg-head { background:${T.header}; color:${T.text}; padding:5px 8px;
+    font-weight:bold; border:1px solid ${T.border}; margin-bottom:1px; }
+.rbpro-cfg-row { display:flex; flex-wrap:wrap; align-items:center;
+    border:1px solid ${T.border}; border-top:none; padding:4px 8px; gap:6px;
+    background:${T.inner}; }
+.rbpro-cfg-row:nth-child(even) { background:${T.table}; }
+.rbpro-cfg-label { flex:1 1 140px; font-size:12px; }
+.rbpro-cfg-ctrl  { flex:0 0 auto; }
+/* ── Inputs ─────────────────────────────────────────────── */
 .rbpro-input { background:${T.input}; color:${T.text}; border:1px solid ${T.border};
-    padding:3px 6px; width:90px; border-radius:3px; }
+    padding:6px 8px; width:100px; border-radius:3px;
+    font-size:14px; min-height:36px; box-sizing:border-box; }
+input[type=checkbox].rbpro-check { width:20px; height:20px; cursor:pointer; }
+/* ── Buttons ─────────────────────────────────────────────── */
 .rbpro-btn { background:${T.header}; color:${T.text}; border:1px solid ${T.border};
-    padding:5px 14px; border-radius:4px; cursor:pointer; margin:3px; }
+    padding:8px 14px; border-radius:4px; cursor:pointer; margin:3px;
+    font-size:13px; min-height:38px; touch-action:manipulation; }
 .rbpro-btn:hover { background:${T.table}; }
 .rbpro-btn-send { background:#1a4a1a; color:#aaffaa; border:1px solid #2d6e2d;
-    padding:3px 10px; border-radius:3px; cursor:pointer; }
+    padding:7px 12px; border-radius:3px; cursor:pointer;
+    min-height:36px; font-size:13px; touch-action:manipulation; white-space:nowrap; }
 .rbpro-btn-send:hover { background:#2d6e2d; }
-.rbpro-progress-bar { width:100%; height:12px; background:${T.input}; border-radius:6px; margin:6px 0; }
-.rbpro-progress { height:12px; background:#4CAF50; border-radius:6px; transition:width .2s; }
-.rbpro-label { display:inline-block; width:200px; }
+/* ── Progress ───────────────────────────────────────────── */
+.rbpro-progress-bar { width:100%; height:14px; background:${T.input};
+    border-radius:6px; margin:6px 0; }
+.rbpro-progress { height:14px; background:#4CAF50; border-radius:6px; transition:width .2s; }
+/* ── Misc ───────────────────────────────────────────────── */
 .rbpro-section { margin:8px 0; padding:6px; background:${T.table}; border-radius:4px; }
 .rbpro-tag-good { color:#4eff4e; font-weight:bold; }
 .rbpro-tag-bad  { color:#ff6060; font-weight:bold; }
 a.rbpro-link { color:${T.border}; }
+/* ── Desktop override ───────────────────────────────────── */
+@media (min-width:600px) {
+    .rbpro-container { width:54%; min-width:420px; top:50px; left:23%; }
+    .rbpro-header h2 { font-size:15px; }
+    .rbpro-cfg-label { flex-basis:180px; }
+}
 </style>`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -851,23 +884,23 @@ ${CSS()}
 
   <div id="rbpro_body" class="rbpro-body">
     <div class="rbpro-section">
-      <table class="rbpro-table">
-        <tr><th colspan="2">${L.settings}</th></tr>
-        <tr><td>${L.merchants}</td><td><input id="cfg_res"  class="rbpro-input" type="number" value="${CFG.reserveMerchants}"  min="0"></td></tr>
-        <tr><td>${L.constrTime}</td><td><input id="cfg_ht"  class="rbpro-input" type="number" value="${CFG.constructionHours}" min="0" max="100"></td></tr>
-        <tr><td>${L.avgFactor}</td><td><input id="cfg_af"   class="rbpro-input" type="number" value="${CFG.averageFactor}"      min="0" max="1" step="0.05"></td></tr>
-        <tr><td>${L.nrClusters}</td><td><input id="cfg_nc"  class="rbpro-input" type="number" value="${CFG.nrClusters}"         min="1"></td></tr>
-        ${isSpecialCap ? `<tr><td>${L.merchantCap}</td><td><input id="cfg_mc" class="rbpro-input" type="number" value="${CFG.merchantCapacity}" min="1000" max="1500"></td></tr>` : ""}
-        <tr><td>${L.maxConstr}</td><td><input id="cfg_mc2" type="checkbox" ${CFG.maxConstruction?"checked":""}></td></tr>
-        <tr><th colspan="2">Village Priorities</th></tr>
-        <tr><td>${L.lowPoints}</td><td><input id="cfg_lp"   class="rbpro-input" type="number" value="${CFG.lowPoints}"></td></tr>
-        <tr><td>${L.highPoints}</td><td><input id="cfg_hp"  class="rbpro-input" type="number" value="${CFG.highPoints}"></td></tr>
-        <tr><td>${L.highFarm}</td><td><input id="cfg_hf"    class="rbpro-input" type="number" value="${CFG.highFarm}"></td></tr>
-        <tr><td>${L.builtPct}</td><td><input id="cfg_bp"    class="rbpro-input" type="number" value="${CFG.builtOutPct}"  min="0" max="1" step="0.05"></td></tr>
-        <tr><td>${L.needsPct}</td><td><input id="cfg_np"    class="rbpro-input" type="number" value="${CFG.needsMorePct}" min="0" max="1" step="0.05"></td></tr>
-        <tr><td>${L.minting}</td><td><input id="cfg_mint" type="checkbox" ${CFG.mintingMode?"checked":""}></td></tr>
-      </table>
-      <button class="rbpro-btn" onclick="window._rbSaveCfg()">${L.saveBtn}</button>
+      <div class="rbpro-cfg">
+        <div class="rbpro-cfg-head">${L.settings}</div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.merchants}</span><span class="rbpro-cfg-ctrl"><input id="cfg_res"  class="rbpro-input" type="number" value="${CFG.reserveMerchants}"  min="0"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.constrTime}</span><span class="rbpro-cfg-ctrl"><input id="cfg_ht"  class="rbpro-input" type="number" value="${CFG.constructionHours}" min="0" max="100"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.avgFactor}</span><span class="rbpro-cfg-ctrl"><input id="cfg_af"   class="rbpro-input" type="number" value="${CFG.averageFactor}"      min="0" max="1" step="0.05"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.nrClusters}</span><span class="rbpro-cfg-ctrl"><input id="cfg_nc"  class="rbpro-input" type="number" value="${CFG.nrClusters}"         min="1"></span></div>
+        ${isSpecialCap ? `<div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.merchantCap}</span><span class="rbpro-cfg-ctrl"><input id="cfg_mc" class="rbpro-input" type="number" value="${CFG.merchantCapacity}" min="1000" max="1500"></span></div>` : `<input type="hidden" id="cfg_mc" value="${CFG.merchantCapacity}">`}
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.maxConstr}</span><span class="rbpro-cfg-ctrl"><input id="cfg_mc2" class="rbpro-check" type="checkbox" ${CFG.maxConstruction?"checked":""}></span></div>
+        <div class="rbpro-cfg-head" style="margin-top:6px">Village Priorities</div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.lowPoints}</span><span class="rbpro-cfg-ctrl"><input id="cfg_lp"   class="rbpro-input" type="number" value="${CFG.lowPoints}"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.highPoints}</span><span class="rbpro-cfg-ctrl"><input id="cfg_hp"  class="rbpro-input" type="number" value="${CFG.highPoints}"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.highFarm}</span><span class="rbpro-cfg-ctrl"><input id="cfg_hf"    class="rbpro-input" type="number" value="${CFG.highFarm}"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.builtPct}</span><span class="rbpro-cfg-ctrl"><input id="cfg_bp"    class="rbpro-input" type="number" value="${CFG.builtOutPct}"  min="0" max="1" step="0.05"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.needsPct}</span><span class="rbpro-cfg-ctrl"><input id="cfg_np"    class="rbpro-input" type="number" value="${CFG.needsMorePct}" min="0" max="1" step="0.05"></span></div>
+        <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.minting}</span><span class="rbpro-cfg-ctrl"><input id="cfg_mint" class="rbpro-check" type="checkbox" ${CFG.mintingMode?"checked":""}></span></div>
+      </div>
+      <button class="rbpro-btn" style="margin-top:6px" onclick="window._rbSaveCfg()">${L.saveBtn}</button>
     </div>
 
     <center>
@@ -1040,6 +1073,7 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
 
     let html = `
     <div class="rbpro-section">
+      <div class="rbpro-scroll">
       <table class="rbpro-table">
         <tr><th></th><th>🪵 ${L.wood}</th><th>🪨 ${L.stone}</th><th>⚙ ${L.iron}</th></tr>
         <tr><td><b>Total</b></td><td>${fmt(totalW)}</td><td>${fmt(totalS)}</td><td>${fmt(totalI)}</td></tr>
@@ -1050,10 +1084,11 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
           <td>${fmt(rows.reduce((a,r)=>a+r.iron,0))}</td>
         </tr>
       </table>
+      </div>
       <button class="rbpro-btn" onclick="window._rbShowClusters()">📊 ${L.clusters}</button>
       <button class="rbpro-btn" onclick="window._rbShowResult()">📋 ${L.results}</button>
     </div>
-    <div style="max-height:460px;overflow-y:auto">
+    <div class="rbpro-scroll" style="max-height:460px;overflow-y:auto">
     <table class="rbpro-table" id="rbpro_sendtable">
       <tr>
         <th>#</th>
