@@ -241,7 +241,19 @@
             $el.val() ||
             '0'
           );
-          let count = (val === 'all') ? avail : Math.min(parseInt(val) || 0, avail);
+          // Eingabe-Logik:
+          //   leer / "alle" (∞)  → alle verfügbaren Truppen
+          //   positive Zahl      → genau diese Anzahl (max: verfügbar)
+          //   negative Zahl      → Reserve: alle MINUS dieser Betrag (z.B. -400 → avail - 400)
+          let numVal = parseInt(val);
+          let count;
+          if (val === 'all') {
+            count = avail;
+          } else if (numVal < 0) {
+            count = Math.max(0, avail + numVal); // avail - Reserve
+          } else {
+            count = Math.min(numVal || 0, avail);
+          }
           if (count > 0) {
             step1Data[u.key] = String(count);
             hasUnits = true;
