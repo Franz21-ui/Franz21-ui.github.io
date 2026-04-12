@@ -25,6 +25,26 @@
     'aufkl':'spy','adel':'snob','paladin':'knight',
   };
 
+  // Gebäude die Katapulte angreifen können
+  const BUILDINGS = [
+    { key: '',         label: '— Standard —'      },
+    { key: 'main',     label: 'Hauptgebäude'       },
+    { key: 'barracks', label: 'Kaserne'             },
+    { key: 'stable',   label: 'Stall'               },
+    { key: 'garage',   label: 'Werkstatt'           },
+    { key: 'church',   label: 'Kirche'              },
+    { key: 'snob',     label: 'Adelshof'            },
+    { key: 'smith',    label: 'Schmiede'            },
+    { key: 'place',    label: 'Versammlungsplatz'   },
+    { key: 'market',   label: 'Marktplatz'          },
+    { key: 'wood',     label: 'Holzfällerlager'     },
+    { key: 'stone',    label: 'Lehmgrube'           },
+    { key: 'iron',     label: 'Eisenmine'           },
+    { key: 'farm',     label: 'Bauernhof'           },
+    { key: 'storage',  label: 'Speicher'            },
+    { key: 'wall',     label: 'Wall'                },
+  ];
+
   // Bekannte Formular-Felder (alles andere ist kandidat für CSRF, aber h ist bevorzugt)
   const KNOWN_FIELDS = [
     'template_id','source_village','source','spear','sword','axe','spy',
@@ -102,7 +122,7 @@
           originCoord, targetCoord,
           targetName: targetFull.replace(/\s*\(.*\).*$/, '').trim(),
           unitRaw, troops, departTs, arriveTs,
-          status: 'pending', timerId: null,
+          building: '', status: 'pending', timerId: null,
         });
       } catch (e) {
         console.warn('[TWOps] Parse-Fehler Zeile ' + i, e);
@@ -333,6 +353,12 @@
           // attack muss gesetzt sein
           if (!step2Data.attack) step2Data.attack = 'Angreifen';
 
+          // Kata-Ziel überschreiben wenn vom User gesetzt (leerer Wert = Server-Standard)
+          if (op.building) {
+            step2Data.building = op.building;
+            console.log('[TWOps] Kata-Ziel gesetzt:', op.building);
+          }
+
           if (!step2Data.ch) {
             console.warn('[TWOps] ch-Hash nicht gefunden — Senden könnte fehlschlagen.');
           }
@@ -405,6 +431,8 @@
     + '.ops-troop-cell{display:flex;flex-wrap:wrap;gap:2px;justify-content:center}'
     + '.ops-troop-entry{display:flex;flex-direction:column;align-items:center;font-size:9px}'
     + '.ops-troop-entry label{color:#555;margin-bottom:1px}'
+    + '.ops-kata-row{margin-top:4px;font-size:9px;text-align:center}'
+    + '.ops-kata-sel{font-size:10px;padding:1px 2px;border-radius:2px;border:1px solid #aaa;background:#fff;color:#333;cursor:pointer;max-width:140px}'
     + '</style>';
 
   const buildTroopCell = (op) => {
@@ -422,7 +450,16 @@
         + '<button class="ops-all-btn" data-op="' + op.id + '" data-unit="' + u.key + '">∞</button>'
         + '</div></div>';
     });
-    return h + '</div>';
+    // Kata-Ziel Dropdown
+    let opts = BUILDINGS.map(b =>
+      '<option value="' + b.key + '"' + (op.building === b.key ? ' selected' : '') + '>'
+      + b.label + '</option>'
+    ).join('');
+    h += '</div>'
+      + '<div class="ops-kata-row">🪨 Kata-Ziel: '
+      + '<select class="ops-kata-sel" data-op="' + op.id + '">' + opts + '</select>'
+      + '</div>';
+    return h;
   };
 
   const buildTable = (ops) => {
@@ -550,6 +587,9 @@
           op.troops[u.key] = val;
         }
       });
+      // Kata-Ziel auslesen
+      let kataSel = document.querySelector('.ops-kata-sel[data-op="' + op.id + '"]');
+      if (kataSel) op.building = kataSel.value;
     });
   };
 
@@ -606,14 +646,14 @@
       updateSummary(currentOps);
       $(this).prop('disabled', true);
       $('#twOpsCancel').prop('disabled', false);
-      $('input.ops-troop-input, .ops-all-btn').prop('disabled', true);
+      $('input.ops-troop-input, .ops-all-btn, .ops-kata-sel').prop('disabled', true);
       UI.SuccessMessage(pending.length + ' Angriffe geplant.');
     });
 
     $('#twOpsCancel').on('click', function () {
       cancelAll(currentOps);
       $(this).prop('disabled', true);
-      $('input.ops-troop-input, .ops-all-btn').prop('disabled', false);
+      $('input.ops-troop-input, .ops-all-btn, .ops-kata-sel').prop('disabled', false);
     });
   };
 
