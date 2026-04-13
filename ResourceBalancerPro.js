@@ -1,23 +1,9 @@
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║          ResourceBalancer PRO — Tribal Wars  v2.2  (OPTIMIZED)          ║
+// ║          ResourceBalancer PRO — Tribal Wars  v2.0                       ║
 // ║  Merged & improved from:                                                ║
 // ║   • Costache Madalin  (K-means clustering, AM integration, map view)    ║
 // ║   • Sophie "Shinko to Kuma" (village priorities, sitter, multi-lang)    ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
-//
-// ═══ CHANGELOG v2.2 ════════════════════════════════════════════════════════
-//  OPT 1: fetchAMData — inkrementeller Aufbau statt O(H×V×B) Neuberechnung
-//          → jede Stunden-Map baut auf der vorherigen auf (O(V×B) gesamt)
-//  OPT 2: calculateLaunches — Distanzen vorberechnen, einmal sortieren
-//          → war O(R × S log S), jetzt O(S log S + R×S)
-//  OPT 3: amMap.get(v.coord) — einmal holen statt 3× pro Village
-//  OPT 4: minSend — aus der Schleife herausgezogen (war reeval per Launch)
-//  OPT 5: clusterStats.maxDist — Set statt O(L×C) filter+some
-//  OPT 6: kmeans — toter Code (worstIdx) entfernt
-//  OPT 7: getVillagePriority — Ergebnis direkt in getTargetAmounts genutzt,
-//          kein Doppelaufruf mehr; priority-Feld am Village gecacht
-//  OPT 8: eff-Spread — nur benötigte Felder kopiert, kein ...v Fullspread
-// ═══════════════════════════════════════════════════════════════════════════
 //
 // ═══ PERFECT SETUP GUIDE ═══════════════════════════════════════════════════
 //  reserveMerchants : 0 (farming), 2-3 (active war — keep traders free)
@@ -33,6 +19,7 @@
 //  needsMorePct     : 0.80-0.90  (fill small/building villages to 80-90%)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ─── Guard: prevent double-run ───────────────────────────────────────────────
 if (window._rbProRunning) { document.getElementById("rbpro_container")?.remove(); }
 window._rbProRunning = true;
 
@@ -42,43 +29,58 @@ window._rbProRunning = true;
 const LANG_MAP = {
     en_DK: { title:"Resource Balancer PRO", source:"Source", target:"Target",
               distance:"Distance", wood:"Wood", stone:"Clay", iron:"Iron",
-              send:"Send", clusters:"Clusters", results:"Results",
-              settings:"Settings", start:"Start",
+              send:"Send", totalW:"Total wood", totalS:"Total clay", totalI:"Total iron",
+              avgW:"Avg wood", avgS:"Avg clay", avgI:"Avg iron",
+              surplus:"Surplus", deficit:"Deficit", clusters:"Clusters",
+              results:"Results", settings:"Settings", start:"Start",
               merchants:"Reserve merchants", constrTime:"Construction time [h]",
               avgFactor:"Average factor [0–1]", nrClusters:"Nr of clusters",
               merchantCap:"Merchant capacity", maxConstr:"Auto-max construction",
               lowPoints:"Prioritise villages below (points)",
-              highPoints:"Built-out above (points)", highFarm:"Built-out above (pop)",
-              builtPct:"WH% for built-out villages", needsPct:"WH% for priority villages",
-              minting:"Minting mode", saveBtn:"Save",
+              highPoints:"Built-out above (points)",
+              highFarm:"Built-out above (pop)",
+              builtPct:"WH% for built-out villages",
+              needsPct:"WH% for priority villages",
+              minting:"Minting mode", sitter:"Account-sitter active",
+              saveBtn:"Save", resetBtn:"Reset themes",
               done:"Done!", progress:"Processing…",
-              saved:"Saved — re-run script", by:"ResourceBalancer PRO v2.2" },
+              saved:"Saved — re-run script", by:"ResourceBalancer PRO v2" },
     de_DE: { title:"Ressourcen-Ausgleich PRO", source:"Herkunft", target:"Ziel",
               distance:"Distanz", wood:"Holz", stone:"Lehm", iron:"Eisen",
-              send:"Schicken", clusters:"Cluster", results:"Ergebnisse",
-              settings:"Einstellungen", start:"Start",
+              send:"Schicken", totalW:"Gesamt Holz", totalS:"Gesamt Lehm", totalI:"Gesamt Eisen",
+              avgW:"Ø Holz", avgS:"Ø Lehm", avgI:"Ø Eisen",
+              surplus:"Überschuss", deficit:"Defizit", clusters:"Cluster",
+              results:"Ergebnisse", settings:"Einstellungen", start:"Start",
               merchants:"Reserve-Händler", constrTime:"Bauzeit [h]",
               avgFactor:"Durchschnittsfaktor [0–1]", nrClusters:"Anzahl Cluster",
               merchantCap:"Händlerkapazität", maxConstr:"Auto-Max-Bau",
               lowPoints:"Kleine Dörfer priorisieren (Punkte)",
-              highPoints:"Fertig ausgebaut ab (Punkte)", highFarm:"Fertig ausgebaut ab (Bev.)",
-              builtPct:"WH% für ausgebaute Dörfer", needsPct:"WH% für Prioritätsdörfer",
-              minting:"Münz-Modus", saveBtn:"Speichern",
+              highPoints:"Fertig ausgebaut ab (Punkte)",
+              highFarm:"Fertig ausgebaut ab (Bev.)",
+              builtPct:"WH% für ausgebaute Dörfer",
+              needsPct:"WH% für Prioritätsdörfer",
+              minting:"Münz-Modus", sitter:"Account-Sitter aktiv",
+              saveBtn:"Speichern", resetBtn:"Themes zurücksetzen",
               done:"Fertig!", progress:"Berechnung…",
-              saved:"Gespeichert — Skript neu starten", by:"ResourceBalancer PRO v2.2" },
+              saved:"Gespeichert — Skript neu starten", by:"ResourceBalancer PRO v2" },
     ro_RO: { title:"Echilibrare Resurse PRO", source:"Origine", target:"Destinatie",
               distance:"Distanta", wood:"Lemn", stone:"Argila", iron:"Fier",
-              send:"Trimite", clusters:"Clustere", results:"Rezultate",
-              settings:"Setari", start:"Start",
+              send:"Trimite", totalW:"Total lemn", totalS:"Total argila", totalI:"Total fier",
+              avgW:"Medie lemn", avgS:"Medie argila", avgI:"Medie fier",
+              surplus:"Surplus", deficit:"Deficit", clusters:"Clustere",
+              results:"Rezultate", settings:"Setari", start:"Start",
               merchants:"Comercianti rezerva", constrTime:"Timp constructie [h]",
               avgFactor:"Factor mediu [0–1]", nrClusters:"Nr clustere",
               merchantCap:"Capacitate comerciant", maxConstr:"Constructie maxima auto",
               lowPoints:"Prioritizeaza sate mici (puncte)",
-              highPoints:"Sate finalizate (puncte)", highFarm:"Sate finalizate (pop)",
-              builtPct:"% depozit sate finalizate", needsPct:"% depozit sate prioritare",
-              minting:"Mod batere monede", saveBtn:"Salvare",
+              highPoints:"Sate finalizate (puncte)",
+              highFarm:"Sate finalizate (pop)",
+              builtPct:"% depozit sate finalizate",
+              needsPct:"% depozit sate prioritare",
+              minting:"Mod batere monede", sitter:"Sitter activ",
+              saveBtn:"Salvare", resetBtn:"Reset teme",
               done:"Gata!", progress:"Procesare…",
-              saved:"Salvat — reporneste scriptul", by:"ResourceBalancer PRO v2.2" },
+              saved:"Salvat — reporneste scriptul", by:"ResourceBalancer PRO v2" },
 };
 const L = LANG_MAP[game_data.locale] || LANG_MAP.en_DK;
 
@@ -99,6 +101,7 @@ function applyTheme(name) {
 
 const CSS = () => `
 <style id="rbpro_css">
+/* ── Mobile-first base ───────────────────────────────────── */
 .rbpro-container {
     position:fixed; top:4px; left:2vw; width:96vw;
     background:${T.bg}; border:2px solid ${T.border}; border-radius:6px;
@@ -109,26 +112,34 @@ const CSS = () => `
     display:flex; align-items:center; justify-content:space-between;
     cursor:move; flex-shrink:0; }
 .rbpro-header h2 { margin:0; font-size:14px; color:${T.text}; }
-.rbpro-body { padding:8px; overflow-y:auto; flex:1; min-height:0; -webkit-overflow-scrolling:touch; }
+.rbpro-body { padding:8px; overflow-y:auto; flex:1; min-height:0;
+    -webkit-overflow-scrolling:touch; }
 .rbpro-footer { background:${T.header}; padding:4px 10px; border-radius:0 0 4px 4px;
     font-size:11px; color:${T.text}; opacity:.7; flex-shrink:0; }
+/* ── Tables ─────────────────────────────────────────────── */
 .rbpro-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; width:100%; }
 .rbpro-table { width:100%; border-collapse:collapse; margin:6px 0; min-width:280px; }
-.rbpro-table td, .rbpro-table th { padding:5px 6px; border:1px solid ${T.border}; white-space:nowrap; }
+.rbpro-table td, .rbpro-table th { padding:5px 6px; border:1px solid ${T.border};
+    white-space:nowrap; }
 .rbpro-table tr:nth-child(even) { background:${T.table}; }
 .rbpro-table tr:nth-child(odd)  { background:${T.inner}; }
 .rbpro-table th { background:${T.header}; color:${T.text}; }
+/* ── Settings rows (div-based, responsive) ──────────────── */
 .rbpro-cfg { width:100%; }
 .rbpro-cfg-head { background:${T.header}; color:${T.text}; padding:5px 8px;
     font-weight:bold; border:1px solid ${T.border}; margin-bottom:1px; }
 .rbpro-cfg-row { display:flex; flex-wrap:wrap; align-items:center;
-    border:1px solid ${T.border}; border-top:none; padding:4px 8px; gap:6px; background:${T.inner}; }
+    border:1px solid ${T.border}; border-top:none; padding:4px 8px; gap:6px;
+    background:${T.inner}; }
 .rbpro-cfg-row:nth-child(even) { background:${T.table}; }
 .rbpro-cfg-label { flex:1 1 140px; font-size:12px; }
 .rbpro-cfg-ctrl  { flex:0 0 auto; }
+/* ── Inputs ─────────────────────────────────────────────── */
 .rbpro-input { background:${T.input}; color:${T.text}; border:1px solid ${T.border};
-    padding:6px 8px; width:100px; border-radius:3px; font-size:14px; min-height:36px; box-sizing:border-box; }
+    padding:6px 8px; width:100px; border-radius:3px;
+    font-size:14px; min-height:36px; box-sizing:border-box; }
 input[type=checkbox].rbpro-check { width:20px; height:20px; cursor:pointer; }
+/* ── Buttons ─────────────────────────────────────────────── */
 .rbpro-btn { background:${T.header}; color:${T.text}; border:1px solid ${T.border};
     padding:8px 14px; border-radius:4px; cursor:pointer; margin:3px;
     font-size:13px; min-height:38px; touch-action:manipulation; }
@@ -137,10 +148,16 @@ input[type=checkbox].rbpro-check { width:20px; height:20px; cursor:pointer; }
     padding:7px 12px; border-radius:3px; cursor:pointer;
     min-height:36px; font-size:13px; touch-action:manipulation; white-space:nowrap; }
 .rbpro-btn-send:hover { background:#2d6e2d; }
-.rbpro-progress-bar { width:100%; height:14px; background:${T.input}; border-radius:6px; margin:6px 0; }
+/* ── Progress ───────────────────────────────────────────── */
+.rbpro-progress-bar { width:100%; height:14px; background:${T.input};
+    border-radius:6px; margin:6px 0; }
 .rbpro-progress { height:14px; background:#4CAF50; border-radius:6px; transition:width .2s; }
+/* ── Misc ───────────────────────────────────────────────── */
 .rbpro-section { margin:8px 0; padding:6px; background:${T.table}; border-radius:4px; }
+.rbpro-tag-good { color:#4eff4e; font-weight:bold; }
+.rbpro-tag-bad  { color:#ff6060; font-weight:bold; }
 a.rbpro-link { color:${T.border}; }
+/* ── Desktop override ───────────────────────────────────── */
 @media (min-width:600px) {
     .rbpro-container { width:54%; min-width:420px; top:50px; left:23%; }
     .rbpro-header h2 { font-size:15px; }
@@ -180,7 +197,7 @@ let CFG = loadSettings();
 // ═══════════════════════════════════════════════════════════════════════════════
 const fmt = n => new Intl.NumberFormat().format(Math.round(n));
 
-// Koordinaten-Cache: "123|456" → [123, 456] wird nur einmal geparst
+// ── Coordinate cache: parse "123|456" strings only ONCE ──────────────────────
 const _xyCache = new Map();
 function xy(coord) {
     if (!_xyCache.has(coord)) {
@@ -195,11 +212,8 @@ function dist(c1, c2) {
     return Math.hypot(x1-x2, y1-y2);
 }
 
-// Quadratische Distanz (kein sqrt) — für reine Sortier-/Vergleichszwecke effizienter
-function dist2(ax, ay, bx, by) {
-    return (ax-bx)**2 + (ay-by)**2;
-}
-
+// ── Async page fetch: replaces blocking synchronous httpGet() ─────────────────
+// FIX: old httpGet() used synchronous XHR which froze the browser UI thread.
 async function fetchPage(url) {
     const r = await fetch(url, { credentials: "include" });
     if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
@@ -209,7 +223,7 @@ async function fetchPage(url) {
 function ajaxGet(url, delayMs = 220) {
     return new Promise((res, rej) => {
         const t0 = Date.now();
-        $.ajax({ url, method:"get",
+        $.ajax({ url, method:"get", dataType:"text",
             success: data => setTimeout(() => res(data), Math.max(0, delayMs - (Date.now()-t0))),
             error:   err  => rej(err)
         });
@@ -217,7 +231,7 @@ function ajaxGet(url, delayMs = 220) {
 }
 
 function getPages(htmlDoc, baseUrl) {
-    const sel = $(htmlDoc).find(".paged-nav-item").parent().find("select");
+    const sel = $(htmlDoc.body).find(".paged-nav-item").parent().find("select");
     if (sel.length) {
         const opts = Array.from(sel.find("option")).map(o => o.value);
         opts.pop();
@@ -230,23 +244,24 @@ function getPages(htmlDoc, baseUrl) {
     return [baseUrl];
 }
 
-const isSitter  = game_data.player.sitter > 0;
+// Sitter-aware URLs
+const isSitter = game_data.player.sitter > 0;
 const sitPrefix = isSitter ? `t=${game_data.player.id}&` : "";
-const urlBase   = game_data.link_base_pure;
+const urlBase = game_data.link_base_pure;
 
 function buildUrl(screen, extra = "") {
     return `${urlBase}${screen}&${sitPrefix}${extra}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 5. DATA FETCHING
+// 5. DATA FETCHING   (all async — no browser freeze)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function fetchProduction() {
-    const baseUrl   = buildUrl("overview_villages&mode=prod", "page=-1");
-    const firstPage = await fetchPage(baseUrl);
-    const doc0      = new DOMParser().parseFromString(firstPage, "text/html");
-    const pages     = getPages(doc0, baseUrl);
+    const baseUrl = buildUrl("overview_villages&mode=prod", "page=-1");
+    const firstPage = await fetchPage(baseUrl);                    // FIX: was httpGet
+    const doc0 = new DOMParser().parseFromString(firstPage, "text/html");
+    const pages = getPages(doc0, baseUrl);
 
     const villages  = [];
     const farmUsage = new Map();
@@ -257,7 +272,7 @@ async function fetchProduction() {
         const doc  = new DOMParser().parseFromString(data, "text/html");
 
         if (isDesktop) {
-            Array.from($(doc).find(".row_a, .row_b")).forEach(row => {
+            Array.from(doc.querySelectorAll(".row_a, .row_b")).forEach(row => {
                 try {
                     const qe     = row.querySelector(".quickedit-vn");
                     const coord  = qe.innerText.match(/\d{3}\|\d{3}/)[0];
@@ -273,6 +288,7 @@ async function fetchProduction() {
                     const points = parseInt(row.children[2].innerText.replace(/\./g,""));
                     const farmCur= parseInt(row.children[6].innerText.split("/")[0]);
                     const farmMax= parseInt(row.children[6].innerText.split("/")[1]);
+
                     villages.push({ coord, id, name, wood, stone, iron,
                                     merchants:merch, merchantsTotal:mTotal,
                                     capacity:cap, points, farmUsed:farmCur, farmTotal:farmMax });
@@ -280,7 +296,7 @@ async function fetchProduction() {
                 } catch(e) {}
             });
         } else {
-            Array.from($(doc).find(".overview-container-item")).forEach(row => {
+            Array.from(doc.querySelectorAll(".overview-container-item")).forEach(row => {
                 try {
                     const name   = $(row).find(".quickedit-label").text().trim();
                     const coord  = name.match(/\d+\|\d+/)?.[0];
@@ -295,9 +311,10 @@ async function fetchProduction() {
                     const farmTxt= row.querySelector(".population").parentElement.innerText;
                     const farmCur= parseInt(farmTxt.split("/")[0]);
                     const farmMax= parseInt(farmTxt.split("/")[1]);
+
                     villages.push({ coord, id, name, wood, stone, iron,
-                                    merchants:merch, merchantsTotal:500,
-                                    capacity:cap, points, farmUsed:farmCur, farmTotal:farmMax });
+                                    merchants: merch, merchantsTotal: 500,
+                                    capacity: cap, points, farmUsed: farmCur, farmTotal: farmMax });
                     farmUsage.set(coord, farmCur / farmMax);
                 } catch(e) {}
             });
@@ -307,28 +324,31 @@ async function fetchProduction() {
 }
 
 async function fetchIncoming() {
-    const baseUrl   = buildUrl("overview_villages&mode=trader&type=inc", "page=-1&type=inc");
-    const firstPage = await fetchPage(baseUrl);
-    const doc0      = new DOMParser().parseFromString(firstPage, "text/html");
-    const pages     = getPages(doc0, baseUrl);
-    const incoming  = new Map();
+    const baseUrl  = buildUrl("overview_villages&mode=trader&type=inc", "page=-1&type=inc");
+    const firstPage = await fetchPage(baseUrl);                    // FIX: was httpGet
+    const doc0  = new DOMParser().parseFromString(firstPage, "text/html");
+    const pages = getPages(doc0, baseUrl);
+
+    const incoming = new Map(); // coord → {wood,stone,iron}
 
     for (const url of pages) {
         const data = await ajaxGet(url);
         const doc  = new DOMParser().parseFromString(data, "text/html");
-        Array.from($(doc).find(".row_a, .row_b")).forEach(row => {
+        Array.from(doc.querySelectorAll(".row_a, .row_b")).forEach(row => {
             try {
                 let coord;
                 if (game_data.device === "desktop") {
                     coord = row.children[4].innerText.match(/\d{3}\|\d{3}/)?.[0];
                 } else {
-                    // FIX C (v2.1): at(-1) — Ziel-Koordinate ist immer die letzte
-                    coord = row.children[3].innerText.match(/\d{3}\|\d{3}/g)?.at(-1);
+                    const matches = row.children[3].innerText.match(/\d{3}\|\d{3}/g);
+                    coord = matches && matches.length >= 2 ? matches[1] : matches?.[0];  // FIX: safe access
                 }
                 if (!coord) return;
+
                 const w  = parseInt($(row).find(".wood").parent().text().replace(/\./g,""))  || 0;
                 const s  = parseInt($(row).find(".stone").parent().text().replace(/\./g,"")) || 0;
                 const fe = parseInt($(row).find(".iron").parent().text().replace(/\./g,""))  || 0;
+
                 if (incoming.has(coord)) {
                     const e = incoming.get(coord);
                     e.wood += w; e.stone += s; e.iron += fe;
@@ -341,121 +361,95 @@ async function fetchIncoming() {
     return incoming;
 }
 
-// ─── Account Manager ──────────────────────────────────────────────────────────
-//
-// OPT 1: INKREMENTELLER AUFBAU statt Neuberechnung pro Stunde
-// ────────────────────────────────────────────────────────────
-// Alt: für jede Stunde h = new Map(buildings) + kompletter Neu-Durchlauf → O(H × V × B)
-//      Bei 100h × 50 Dörfer × 20 Gebäude = 100.000 Iterationen
-//
-// Neu: einmal alle Bau-Ereignisse chronologisch auflisten (Event-Liste),
-//      dann für jede Stunde nur kumulieren bis zum Zeitlimit → O(V×B + H×E)
-//      Bei 50 Dörfer × 20 Gebäude = 1.000 Events, dann 100h × (max paar Events) ≈ 2.000
-//      Speedup: ~50× bei großen Accounts
-//
+// ─── Account Manager integration ─────────────────────────────────────────────
+
+// FIX: Only compute for the actually needed hours (lazy), not always 1-100.
+// Pass maxHours = 1 if constructionHours is fixed; = 100 only for auto-max mode.
 async function fetchAMData(farmUsage, maxHours = 100) {
     if (!game_data.features?.AccountManager?.active) {
-        return Array.from({ length: 100 }, () => new Map());
+        return Array.from({ length: 100 }, () => new Map()); // FIX: was fill(new Map()) → same ref
     }
 
     const { templates, coordMap, farmCapMap } = await fetchAMTemplates();
-    const buildings = await fetchBuildings();
-    const constants = await getbuildingConstants();
+    const buildings  = await fetchBuildings();
+    const constants  = await getbuildingConstants();
 
-    // Phase 1: alle Bau-Events einmalig chronologisch berechnen
-    // Event = { coord, timeS, wood, stone, iron }
-    const events = [];
+    const result = [];
+    for (let hours = 1; hours <= maxHours; hours++) {
+        const amMap = new Map();
+        // FIX: proper Map clone — no JSON.stringify round-trip
+        const bld = new Map(buildings);
 
-    for (const [coord, tplName] of coordMap) {
-        const tpl     = templates.get(tplName);
-        const farmCap = (farmCapMap.get(tplName) || 99) / 100;
-        if (!tpl) continue;
+        // Carry forward already-queued time
+        for (const [k, v] of bld) {
+            if (k.endsWith("_time_queued"))
+                amMap.set(k.replace("_time_queued", ""), { wood:0, stone:0, iron:0, timeH: Math.round(v/3600) });
+        }
 
-        const hq      = buildings.get(coord + "_main") || 1;
-        let   elapsed = buildings.get(coord + "_time_queued") || 0;
+        for (const [coord, tplName] of coordMap) {
+            const tpl     = templates.get(tplName);
+            const farmCap = (farmCapMap.get(tplName) || 99) / 100;
+            if (!tpl) continue;
 
-        // Farm-Upgrade wenn voll
-        const farmLv = buildings.get(coord + "_farm") || 0;
-        if (farmLv < 30 && (farmUsage.get(coord) || 0) >= farmCap) {
-            const res = calcBuildingCost(hq, farmLv + 1, constants.get("farm"));
-            if (res) {
-                elapsed += res[0];
-                events.push({ coord, timeS: elapsed, wood: res[1], stone: res[2], iron: res[3] });
+            let elapsed = bld.get(coord + "_time_queued") || 0;
+
+            // Auto-upgrade farm if at capacity
+            const farmLv = bld.get(coord + "_farm") || 0;
+            if (farmLv < 30 && (farmUsage.get(coord) || 0) >= farmCap) {
+                const hq  = bld.get(coord + "_main") || 1;
+                const res = calcBuildingCost(hq, farmLv + 1, constants.get("farm"));
+                if (res) {
+                    elapsed += res[0];
+                    const existing = amMap.get(coord) || { wood:0, stone:0, iron:0, timeH:0 };
+                    existing.wood += res[1]; existing.stone += res[2]; existing.iron += res[3];
+                    existing.timeH = elapsed / 3600;
+                    amMap.set(coord, existing);
+                }
+            }
+
+            for (const item of tpl) {
+                const key   = coord + "_" + item.name;
+                let   curLv = bld.get(key) || 0;
+                if (item.level_absolute <= curLv) continue;
+
+                for (let j = curLv; j < item.level_absolute; j++) {
+                    const hq  = bld.get(coord + "_main") || 1;
+                    const res = calcBuildingCost(hq, j + 1, constants.get(item.name));
+                    if (!res) continue;
+                    elapsed += res[0];
+
+                    const existing = amMap.get(coord) || { wood:0, stone:0, iron:0, timeH:0 };
+                    existing.wood += res[1]; existing.stone += res[2]; existing.iron += res[3];
+                    existing.timeH = elapsed / 3600;
+                    amMap.set(coord, existing);
+                    bld.set(key, j + 1);
+
+                    if (elapsed > hours * 3600) break;
+                }
+                if (elapsed > hours * 3600) break;
             }
         }
-
-        // Template-Gebäude
-        const bldSnapshot = new Map(buildings); // einmal klonen für diesen Coord-Durchlauf
-        for (const item of tpl) {
-            const key   = coord + "_" + item.name;
-            let   curLv = bldSnapshot.get(key) || 0;
-            if (item.level_absolute <= curLv) continue;
-            for (let j = curLv; j < item.level_absolute; j++) {
-                const res = calcBuildingCost(hq, j + 1, constants.get(item.name));
-                if (!res) continue;
-                elapsed += res[0];
-                events.push({ coord, timeS: elapsed, wood: res[1], stone: res[2], iron: res[3] });
-                bldSnapshot.set(key, j + 1);
-                if (elapsed > maxHours * 3600) break;
-            }
-            if (elapsed > maxHours * 3600) break;
-        }
+        result.push(amMap);
     }
-
-    // Events nach Zeit sortieren — einmal
-    events.sort((a, b) => a.timeS - b.timeS);
-
-    // Phase 2: für jede gewünschte Stunde kumulativ aufbauen
-    // Nutze laufenden Index statt filter() — O(H + E) statt O(H × E)
-    const result    = [];
-    const cumMap    = new Map(); // coord → { wood, stone, iron, timeH }
-    let   evtIdx    = 0;
-    const baseTimeH = new Map(); // queued-Zeit aus buildings (Initialzustand)
-
-    for (const [coord] of coordMap) {
-        const queued = buildings.get(coord + "_time_queued") || 0;
-        if (queued > 0) baseTimeH.set(coord, queued / 3600);
-    }
-
-    for (let h = 1; h <= maxHours; h++) {
-        const limitS = h * 3600;
-        // Alle Events innerhalb dieser Stunde einlesen
-        while (evtIdx < events.length && events[evtIdx].timeS <= limitS) {
-            const ev = events[evtIdx++];
-            const existing = cumMap.get(ev.coord) || { wood:0, stone:0, iron:0, timeH:0 };
-            existing.wood  += ev.wood;
-            existing.stone += ev.stone;
-            existing.iron  += ev.iron;
-            existing.timeH  = ev.timeS / 3600;
-            cumMap.set(ev.coord, existing);
-        }
-        // Snapshot der aktuellen Map (flacher Clone reicht, da primitiv-Werte)
-        const snap = new Map();
-        for (const [coord, val] of cumMap) snap.set(coord, { ...val });
-        // Queued-Basis einmalig aus buildings übernehmen falls noch kein Event
-        for (const [coord, timeH] of baseTimeH) {
-            if (!snap.has(coord)) snap.set(coord, { wood:0, stone:0, iron:0, timeH });
-        }
-        result.push(snap);
-    }
+    // Pad to length 100 if we computed fewer hours
     while (result.length < 100) result.push(result[result.length - 1] || new Map());
     return result;
 }
 
 async function fetchAMTemplates() {
     const baseUrl = buildUrl("am_village");
-    const first   = await fetchPage(baseUrl);
+    const first   = await fetchPage(baseUrl);                      // FIX: was httpGet
     const doc0    = new DOMParser().parseFromString(first, "text/html");
     const pages   = getPages(doc0, baseUrl);
 
-    const coordMap   = new Map();
-    const templates  = new Map();
-    const farmCapMap = new Map();
+    const coordMap  = new Map();
+    const templates = new Map();
+    const farmCapMap= new Map();
 
     for (const url of pages) {
         const data = await ajaxGet(url);
         const doc  = new DOMParser().parseFromString(data, "text/html");
-        Array.from($(doc).find(".row_a, .row_b")).forEach(row => {
+        Array.from(doc.querySelectorAll(".row_a, .row_b")).forEach(row => {
             try {
                 const coord = row.children[0].innerText.match(/\d{3}\|\d{3}/)[0];
                 const tpl   = row.children[1].innerText.trim();
@@ -464,29 +458,33 @@ async function fetchAMTemplates() {
         });
     }
 
-    const opts = Array.from($(doc0).find("select[name=template] option"));
+    const opts = Array.from(doc0.querySelectorAll("select[name='template'] option"));
     for (const opt of opts) {
         const rawName = opt.innerText.replace(/[\n\t]/g,"").replace(/\(\w+\)/,"").trim();
         if (!templates.has(rawName)) continue;
+
         const url  = buildUrl("am_village&mode=queue", `template=${opt.value}`);
         const data = await ajaxGet(url);
         const doc  = new DOMParser().parseFromString(data, "text/html");
-        const rows = Array.from($(doc).find(".sortable_row"));
+
+        const rows = Array.from(doc.querySelectorAll(".sortable_row"));
         templates.set(rawName, rows.map(r => ({
             name:           r.getAttribute("data-building"),
             level_absolute: parseInt($(r).find(".level_absolute").text().match(/\d+/)[0])
         })));
+
         let farmCap = 99;
-        if ($(doc).find("input[name=farm_upgrade_toggle]").is(":checked"))
-            farmCap = 100 - parseInt($(doc).find("select[name=population_upgrades]").val());
+        if (doc.querySelector("input[name='farm_upgrade_toggle']")?.checked)
+            farmCap = 100 - parseInt(doc.querySelector("select[name='population_upgrades']")?.value || "0");
         farmCapMap.set(rawName, farmCap);
     }
+
     return { templates, coordMap, farmCapMap };
 }
 
 async function fetchBuildings() {
     const baseUrl = buildUrl("overview_villages&mode=buildings");
-    const first   = await fetchPage(baseUrl);
+    const first   = await fetchPage(baseUrl);                      // FIX: was httpGet
     const doc0    = new DOMParser().parseFromString(first, "text/html");
     const pages   = getPages(doc0, baseUrl);
     const bld     = new Map();
@@ -494,14 +492,19 @@ async function fetchBuildings() {
     for (const url of pages) {
         const data = await ajaxGet(url);
         const doc  = new DOMParser().parseFromString(data, "text/html");
-        Array.from($(doc).find(".row_a, .row_b")).forEach(row => {
+
+        Array.from(doc.querySelectorAll(".row_a, .row_b")).forEach(row => {
             try {
-                const coord = $(row).find(".nowrap").text().match(/\d{3}\|\d{3}/)?.[0];
+                const coord = row.querySelector(".nowrap")?.textContent.match(/\d{3}\|\d{3}/)?.[0];
                 if (!coord) return;
+
                 const lastQ = $(row).find(".queue_icon img").last().attr("title");
                 bld.set(coord + "_time_queued", lastQ ? getFinishedSeconds(lastQ) : 0);
+
                 $(row).find(".upgrade_building").each((_, el) => {
-                    bld.set(coord + "_" + el.classList[1].replace("b_",""), parseInt(el.innerText));
+                    const name  = el.classList[1].replace("b_","");
+                    const level = parseInt(el.innerText);
+                    bld.set(coord + "_" + name, level);
                 });
                 Array.from($(row).find(".queue_icon img"))
                     .map(e => e.src.match(/\w+\.(webp|png)/)[0].replace(/\.(webp|png)/,""))
@@ -512,13 +515,17 @@ async function fetchBuildings() {
     return bld;
 }
 
+// FIX: async — was using synchronous httpGet
 async function getbuildingConstants() {
     const key = game_data.world + "_rbpro_bldConst";
     if (localStorage.getItem(key)) return new Map(JSON.parse(localStorage.getItem(key)));
-    const data = await fetchPage("/interface.php?func=get_building_info");
-    const doc  = new DOMParser().parseFromString(data, "text/html");
+
+    const data = await fetchPage("/interface.php?func=get_building_info"); // FIX: was httpGet
+    const doc  = new DOMParser().parseFromString(data, "text/xml");
+    const config = doc.querySelector("config");
+    if (!config) throw new Error("Building constants: <config> not found in response");
     const map  = new Map();
-    Array.from(doc.querySelector("config").children).forEach(el => {
+    Array.from(config.children).forEach(el => {
         const n = el.tagName.toLowerCase();
         map.set(n, {
             wood:              +el.querySelector("wood")?.textContent,
@@ -541,9 +548,11 @@ function getFinishedSeconds(title) {
         const srvDate = srv[1]+"/"+srv[0]+"/"+srv[2];
         const srvTime = document.getElementById("serverTime").innerText;
         const now     = new Date(srvDate+" "+srvTime);
-        let dateStr   = "";
+
+        let dateStr = "";
         const todayKey    = lang["aea2b0aa9ae1534226518faaefffdaad"]?.replace(" %s","") || "Today";
         const tomorrowKey = lang["57d28d1b211fddbb7a499ead5bf23079"]?.replace(" %s","") || "Tomorrow";
+
         if (title.includes(todayKey)) {
             dateStr = srvDate+" "+title.match(/\d+:\d+/)[0];
         } else if (title.includes(tomorrowKey)) {
@@ -553,7 +562,8 @@ function getFinishedSeconds(title) {
             const m = title.match(/(\d+)\.(\d+)/);
             if (m) dateStr = m[2]+"/"+m[1]+"/"+srv[2]+" "+title.match(/\d+:\d+/)[0];
         }
-        return Math.max(0, Math.round((new Date(dateStr) - now) / 1000));
+        const fin = new Date(dateStr);
+        return Math.max(0, Math.round((fin - now) / 1000));
     } catch { return 0; }
 }
 
@@ -573,12 +583,21 @@ function calcBuildingCost(hq, level, c) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 6. K-MEANS++
+// 6. K-MEANS++  (replaces random init + O(n²) scoring)
 // ═══════════════════════════════════════════════════════════════════════════════
+// FIX 1: k-means++ initialization — much better starting positions than random.
+//         Requires only 10-15 restarts vs. 40 for random init.
+// FIX 2: SSE scoring (sum of squared dist to centroid) → O(n) instead of O(n²).
+// FIX 3: clusters now correctly initialized to centers[i], not all to centers[0].
+
 function kmeanspp(points, k) {
-    const centers = [points[Math.floor(Math.random() * points.length)].slice()];
+    // k-means++ initialization
+    const centers = [];
+    // Pick first center uniformly at random
+    centers.push(points[Math.floor(Math.random() * points.length)].slice());
+
     for (let c = 1; c < k; c++) {
-        // OPT: squared distance reicht für Gewichtung (kein sqrt nötig)
+        // Each point weighted by squared distance to nearest existing center
         const weights = points.map(p => {
             let minD2 = Infinity;
             for (const cn of centers) {
@@ -590,7 +609,10 @@ function kmeanspp(points, k) {
         const total = weights.reduce((a,w) => a+w, 0);
         let r = Math.random() * total;
         let chosen = points.length - 1;
-        for (let i = 0; i < weights.length; i++) { r -= weights[i]; if (r <= 0) { chosen = i; break; } }
+        for (let i = 0; i < weights.length; i++) {
+            r -= weights[i];
+            if (r <= 0) { chosen = i; break; }
+        }
         centers.push(points[chosen].slice());
     }
     return centers;
@@ -598,32 +620,34 @@ function kmeanspp(points, k) {
 
 function kmeans(points, k, maxIter = 100, restarts = 15) {
     if (points.length <= k) {
-        return points.map((p, i) => ({ center: [...p], points: [p], indices: [i] }));
+        // Trivial: each point is its own cluster
+        return points.map(p => ({ center: [...p], points: [p] }));
     }
+
     let best = null, bestSSE = Infinity;
 
     for (let r = 0; r < restarts; r++) {
-        const clusters = kmeanspp(points, k).map(c => ({ center: c, points: [], indices: [] }));
-        let changed = true, iter = 0;
+        const initCenters = kmeanspp(points, k);
+        // FIX: each cluster gets its own correct center (was all centers[0] before)
+        const clusters = initCenters.map(c => ({ center: [...c], points: [] }));
 
+        let changed = true, iter = 0;
         while (changed && iter++ < maxIter) {
-            clusters.forEach(c => { c.points = []; c.indices = []; });
+            clusters.forEach(c => c.points = []);
             changed = false;
 
-            for (let pi = 0; pi < points.length; pi++) {
-                const p = points[pi];
+            for (const p of points) {
                 let bi = 0, bd = Infinity;
                 for (let i = 0; i < k; i++) {
                     const d = (p[0]-clusters[i].center[0])**2 + (p[1]-clusters[i].center[1])**2;
                     if (d < bd) { bd = d; bi = i; }
                 }
                 clusters[bi].points.push(p);
-                clusters[bi].indices.push(pi);
             }
 
-            clusters.forEach(c => {
+            clusters.forEach((c, i) => {
                 if (!c.points.length) {
-                    // OPT 6: worstIdx war toter Code — entfernt
+                    // Empty cluster: steal the point farthest from its centroid
                     let worst = null, worstD = -1;
                     for (const oc of clusters) {
                         if (oc.points.length <= 1) continue;
@@ -635,14 +659,14 @@ function kmeans(points, k, maxIter = 100, restarts = 15) {
                     if (worst) c.center = [...worst];
                     return;
                 }
-                const n  = c.points.length;
-                const nx = c.points.reduce((a,p) => a+p[0], 0) / n;
-                const ny = c.points.reduce((a,p) => a+p[1], 0) / n;
+                const nx = c.points.reduce((a,p) => a+p[0], 0) / c.points.length;
+                const ny = c.points.reduce((a,p) => a+p[1], 0) / c.points.length;
                 if (Math.abs(nx-c.center[0]) > 0.01 || Math.abs(ny-c.center[1]) > 0.01) changed = true;
                 c.center = [nx, ny];
             });
         }
 
+        // FIX: SSE scoring = O(n) — was O(n²) max pairwise distance before
         let sse = 0;
         for (const c of clusters)
             for (const p of c.points)
@@ -654,28 +678,27 @@ function kmeans(points, k, maxIter = 100, restarts = 15) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 7. PRIORITY & TARGET
+// 7. PRIORITY EVALUATION
 // ═══════════════════════════════════════════════════════════════════════════════
+function getVillagePriority(v) {
+    if (v.farmUsed > CFG.highFarm || v.points > CFG.highPoints) return "builtin";
+    if (v.points < CFG.lowPoints)                                return "small";
+    return "normal";
+}
 
-// OPT 7: getVillagePriority und getTargetAmounts zusammengeführt
-// → kein Doppelaufruf mehr, priority wird inline einmal ermittelt
-// Rückgabe: { w, s, i, priority } — priority für Render-Farbe gecacht
 function getTargetAmounts(v, avgW, avgS, avgI) {
+    const pri = getVillagePriority(v);
     const cap = v.capacity;
-    if (v.farmUsed > CFG.highFarm || v.points > CFG.highPoints) {
-        const t = cap * CFG.builtOutPct;
-        return { w: t, s: t, i: t, priority: "builtin" };
+    if (pri === "small") {
+        return { w: cap * CFG.needsMorePct, s: cap * CFG.needsMorePct, i: cap * CFG.needsMorePct };
     }
-    if (v.points < CFG.lowPoints) {
-        const t = cap * CFG.needsMorePct;
-        return { w: t, s: t, i: t, priority: "small" };
+    if (pri === "builtin") {
+        return { w: cap * CFG.builtOutPct, s: cap * CFG.builtOutPct, i: cap * CFG.builtOutPct };
     }
-    const ceil = cap * CFG.needsMorePct;
     return {
-        w: Math.min(avgW * CFG.averageFactor, ceil),
-        s: Math.min(avgS * CFG.averageFactor, ceil),
-        i: Math.min(avgI * CFG.averageFactor, ceil),
-        priority: "normal",
+        w: Math.min(avgW * CFG.averageFactor, cap * CFG.needsMorePct),
+        s: Math.min(avgS * CFG.averageFactor, cap * CFG.needsMorePct),
+        i: Math.min(avgI * CFG.averageFactor, cap * CFG.needsMorePct),
     };
 }
 
@@ -686,33 +709,21 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
     const allLaunches  = [];
     const clusterStats = [];
 
-    // OPT 4: minSend einmal berechnen, nicht in jeder Sender-Loop
-    const minSend = CFG.merchantCapacity === 1500 ? 1200 : 700;
-
     for (let ci = 0; ci < villagesByCluster.length; ci++) {
         const cluster = villagesByCluster[ci];
         const amMap   = amHours > 0 ? (amMaps[amHours-1] || new Map()) : new Map();
 
-        // OPT 3: amMap.get(v.coord) einmal holen statt 3× pro Village
-        // OPT 8: kein ...v Spread — nur benötigte Felder übernehmen
         const eff = cluster.map(v => {
             const inc = incoming.get(v.coord) || {wood:0,stone:0,iron:0};
-            const am  = amMap.get(v.coord)    || {wood:0,stone:0,iron:0,timeH:0};
             return {
-                coord:    v.coord,
-                id:       v.id,
-                name:     v.name,
-                capacity: v.capacity,
-                points:   v.points,
-                farmUsed: v.farmUsed,
-                merchants:v.merchants,
+                ...v,
                 effW: Math.min(v.wood  + inc.wood,  v.capacity),
                 effS: Math.min(v.stone + inc.stone, v.capacity),
                 effI: Math.min(v.iron  + inc.iron,  v.capacity),
-                amW:  am.wood,
-                amS:  am.stone,
-                amI:  am.iron,
-                amTimeH: am.timeH,
+                amW:    amMap.get(v.coord)?.wood  || 0,
+                amS:    amMap.get(v.coord)?.stone || 0,
+                amI:    amMap.get(v.coord)?.iron  || 0,
+                amTimeH:amMap.get(v.coord)?.timeH || 0,
             };
         });
 
@@ -730,42 +741,44 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
             const cap_travel= merchants * CFG.merchantCapacity;
             const cap_wh    = v.capacity * 0.95;
 
-            // AM-Reserven direkt addieren (Math.round einmal pro Wert)
-            const targetW = Math.round(tgt.w + v.amW);
-            const targetS = Math.round(tgt.s + v.amS);
-            const targetI = Math.round(tgt.i + v.amI);
+            const targetW = Math.round(tgt.w) + Math.round(v.amW);
+            const targetS = Math.round(tgt.s) + Math.round(v.amS);
+            const targetI = Math.round(tgt.i) + Math.round(v.amI);
 
-            const surpW = v.effW - targetW; // < 0 → kein Überschuss
-            const surpS = v.effS - targetS;
-            const surpI = v.effI - targetI;
-            const totalSurp = Math.max(0,surpW) + Math.max(0,surpS) + Math.max(0,surpI);
+            const surpW = Math.max(0, v.effW - targetW);
+            const surpS = Math.max(0, v.effS - targetS);
+            const surpI = Math.max(0, v.effI - targetI);
+            const totalSurp = surpW + surpS + surpI;
 
             if (totalSurp > 0) {
                 const scale = cap_travel < totalSurp ? cap_travel / totalSurp : 1;
                 senders.push({
-                    coord: v.coord, id: v.id, name: v.name,
-                    sendW: Math.floor(Math.max(0,surpW) * scale),
-                    sendS: Math.floor(Math.max(0,surpS) * scale),
-                    sendI: Math.floor(Math.max(0,surpI) * scale),
+                    ...v,
+                    sendW: Math.floor(surpW * scale),
+                    sendS: Math.floor(surpS * scale),
+                    sendI: Math.floor(surpI * scale),
                 });
             }
 
-            const needW = targetW - v.effW;
-            const needS = targetS - v.effS;
-            const needI = targetI - v.effI;
-            if (needW > 0 || needS > 0 || needI > 0) {
+            const needW = Math.max(0, targetW - v.effW);
+            const needS = Math.max(0, targetS - v.effS);
+            const needI = Math.max(0, targetI - v.effI);
+            const freeW = Math.max(0, cap_wh - v.effW);
+            const freeS = Math.max(0, cap_wh - v.effS);
+            const freeI = Math.max(0, cap_wh - v.effI);
+
+            if (needW + needS + needI > 0) {
                 receivers.push({
-                    coord: v.coord, id: v.id, name: v.name,
-                    priority: tgt.priority,
-                    needW: Math.min(Math.max(0,needW), Math.max(0, cap_wh - v.effW)),
-                    needS: Math.min(Math.max(0,needS), Math.max(0, cap_wh - v.effS)),
-                    needI: Math.min(Math.max(0,needI), Math.max(0, cap_wh - v.effI)),
+                    ...v,
+                    needW: Math.min(needW, freeW),
+                    needS: Math.min(needS, freeS),
+                    needI: Math.min(needI, freeI),
                     timeH: v.amTimeH,
                 });
             }
         }
 
-        // Supply/Demand-Normalisierung
+        // Normalize receivers if total need > total supply
         const supW = senders.reduce((a,s) => a+s.sendW, 0);
         const supS = senders.reduce((a,s) => a+s.sendS, 0);
         const supI = senders.reduce((a,s) => a+s.sendI, 0);
@@ -776,35 +789,26 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
         const nW = demW > supW && supW > 0 ? supW/demW : 1;
         const nS = demS > supS && supS > 0 ? supS/demS : 1;
         const nI = demI > supI && supI > 0 ? supI/demI : 1;
-        if (nW < 1 || nS < 1 || nI < 1) {
-            receivers.forEach(r => {
-                r.needW = Math.floor(r.needW * nW);
-                r.needS = Math.floor(r.needS * nS);
-                r.needI = Math.floor(r.needI * nI);
-            });
-        }
+        receivers.forEach(r => {
+            r.needW = Math.floor(r.needW * nW);
+            r.needS = Math.floor(r.needS * nS);
+            r.needI = Math.floor(r.needI * nI);
+        });
 
-        // OPT 2: Distanzen einmal vorberechnen → Sortierung O(S log S) statt O(R × S log S)
-        // Sender-Koordinaten einmalig cachen
-        const senderXY = senders.map(s => xy(s.coord));
-
-        // Cluster-Koordinaten-Set für maxDist-Berechnung (OPT 5)
-        const clusterCoords = new Set(cluster.map(v => v.coord));
-        const launchesStart = allLaunches.length;
-
+        // Match senders → receivers by proximity
+        // FIX: precompute distance from each sender to current receiver (cache coord parse)
         for (const rec of receivers) {
+            // Sort senders by distance to this receiver (using cached xy())
             const [rx, ry] = xy(rec.coord);
-            // Einmalig Distanz-Index aufbauen und sortieren
-            const order = senders
-                .map((_, i) => i)
-                .sort((a, b) => dist2(senderXY[a][0], senderXY[a][1], rx, ry)
-                              - dist2(senderXY[b][0], senderXY[b][1], rx, ry));
+            senders.sort((a, b) => {
+                const [ax,ay] = xy(a.coord), [bx,by] = xy(b.coord);
+                return Math.hypot(ax-rx,ay-ry) - Math.hypot(bx-rx,by-ry);
+            });
 
             let remW = rec.needW, remS = rec.needS, remI = rec.needI;
 
-            for (const si of order) {
+            for (const sen of senders) {
                 if (remW + remS + remI <= 0) break;
-                const sen = senders[si];
                 if (sen.sendW + sen.sendS + sen.sendI <= 0) continue;
                 if (sen.coord === rec.coord) continue;
 
@@ -814,19 +818,20 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
                 const total = giveW + giveS + giveI;
                 if (total <= 0) continue;
 
-                // Merchant-Mindest-Last-Anpassung (minSend bereits außerhalb berechnet)
-                const rem = total % CFG.merchantCapacity;
+                // Avoid partial-merchant sends below minimum load
+                const minSend = CFG.merchantCapacity === 1500 ? 1200 : 700;
+                const rem     = total % CFG.merchantCapacity;
                 let adjW = giveW, adjS = giveS, adjI = giveI;
                 if (rem > 0 && rem < minSend) {
                     const maxRes = Math.max(adjW, adjS, adjI);
-                    if      (adjW === maxRes) adjW -= rem;
+                    if (adjW === maxRes)      adjW -= rem;
                     else if (adjS === maxRes) adjS -= rem;
                     else                      adjI -= rem;
                 }
                 if (adjW + adjS + adjI < minSend) continue;
 
                 allLaunches.push({
-                    coord_origin: sen.coord, id_origin: sen.id, name_origin: sen.name,
+                    coord_origin:      sen.coord, id_origin:      sen.id, name_origin:      sen.name,
                     coord_destination: rec.coord, id_destination: rec.id, name_destination: rec.name,
                     wood: adjW, stone: adjS, iron: adjI,
                     total: adjW + adjS + adjI,
@@ -838,21 +843,17 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
             }
         }
 
-        // OPT 5: maxDist via Set statt O(L×C) filter+some
-        let maxDist = 0;
-        for (let li = launchesStart; li < allLaunches.length; li++) {
-            const l = allLaunches[li];
-            if (clusterCoords.has(l.coord_origin) && l.distance > maxDist)
-                maxDist = l.distance;
-        }
-
+        // Cluster stats
         clusterStats.push({
             n,
             center: cluster.reduce((a,v) => {
                 const [x,y] = xy(v.coord);
                 return { x: a.x + x/n, y: a.y + y/n };
             }, {x:0, y:0}),
-            avgW, avgS, avgI, supW, supS, supI, demW, demS, demI, maxDist
+            avgW, avgS, avgI, supW, supS, supI, demW, demS, demI,
+            maxDist: allLaunches
+                .filter(l => cluster.some(v => v.coord === l.coord_origin))
+                .reduce((a,l) => Math.max(a, l.distance), 0)
         });
     }
 
@@ -875,12 +876,14 @@ ${CSS()}
       <button class="rbpro-btn" onclick="document.getElementById('rbpro_container').remove();window._rbProRunning=false;if(window._rbKeyHandler){window.removeEventListener('keydown',window._rbKeyHandler);}">✕</button>
     </span>
   </div>
+
   <div id="rbpro_themepanel" style="display:none;padding:8px;background:${T.table}">
     <b>${L.settings} — Theme</b><br>
     <button class="rbpro-btn" onclick="window._rbApplyTheme('dark')">Dark</button>
     <button class="rbpro-btn" onclick="window._rbApplyTheme('light')">TW Classic</button>
     <button class="rbpro-btn" onclick="window._rbApplyTheme('gray')">Gray</button>
   </div>
+
   <div id="rbpro_body" class="rbpro-body">
     <div class="rbpro-section">
       <div class="rbpro-cfg">
@@ -901,21 +904,28 @@ ${CSS()}
       </div>
       <button class="rbpro-btn" style="margin-top:6px" onclick="window._rbSaveCfg()">${L.saveBtn}</button>
     </div>
+
     <center>
       <button class="rbpro-btn" style="font-size:15px;padding:8px 28px" onclick="window._rbStart()">▶ ${L.start}</button>
     </center>
+
     <div id="rbpro_progress" style="display:none">
       <div class="rbpro-progress-bar"><div class="rbpro-progress" id="rbpro_bar" style="width:0%"></div></div>
       <div id="rbpro_status" style="font-size:11px;color:${T.text}">${L.progress}</div>
     </div>
+
     <div id="rbpro_results" style="display:none;margin-top:8px"></div>
   </div>
+
   <div class="rbpro-footer">${L.by}</div>
 </div>`;
 
     $("#rbpro_container").remove();
-    $("#contentContainer").eq(0).prepend(html);
-    $("#mobileContent").eq(0).prepend(html);
+    const $host = $("#contentContainer").length
+        ? $("#contentContainer").eq(0)
+        : ($("#mobileContent").length ? $("#mobileContent").eq(0) : $("body"));
+    $host.prepend(html);
+
     try { $("#rbpro_container").draggable({ handle:"#rbpro_drag" }); } catch(e) {}
 }
 
@@ -945,11 +955,15 @@ window._rbSaveCfg = () => {
 
 window._rbStart = async () => {
     window._rbSaveCfg();
+    const prog = document.getElementById("rbpro_progress");
     const bar  = document.getElementById("rbpro_bar");
     const stat = document.getElementById("rbpro_status");
-    document.getElementById("rbpro_progress").style.display = "";
+    prog.style.display = "";
 
-    const setProgress = (pct, msg) => { bar.style.width = pct + "%"; stat.innerText = msg; };
+    function setProgress(pct, msg) {
+        bar.style.width = pct + "%";
+        stat.innerText  = msg;
+    }
 
     try {
         setProgress(5,  "Fetching production data…");
@@ -959,6 +973,7 @@ window._rbStart = async () => {
         const incoming = await fetchIncoming();
 
         setProgress(40, "Fetching AM data…");
+        // FIX: only compute as many hours as actually needed (lazy)
         const amMaxHours = CFG.maxConstruction ? 100 : Math.max(1, CFG.constructionHours || 1);
         let amMaps;
         try { amMaps = await fetchAMData(farmUsage, amMaxHours); }
@@ -966,13 +981,15 @@ window._rbStart = async () => {
 
         setProgress(60, "Calculating clusters…");
         const coords = villages.map(v => xy(v.coord));
-        const k       = Math.max(1, Math.min(CFG.nrClusters, villages.length));
+        const k = Math.max(1, Math.min(CFG.nrClusters, villages.length));
         const clusters = kmeans(coords, k);
 
-        // FIX A (v2.1): villages per Index, nicht per String-Koordinate
-        const villagesByCluster = clusters.map(c =>
-            c.indices.map(idx => villages[idx]).filter(Boolean)
-        );
+        const villagesByCluster = clusters.map(c => {
+            return c.points.map(p => {
+                const coord = p[0] + "|" + p[1];
+                return villages.find(v => v.coord === coord);
+            }).filter(Boolean);
+        });
 
         setProgress(75, "Calculating optimal transfers…");
 
@@ -982,7 +999,10 @@ window._rbStart = async () => {
                 const { launches } = calculateLaunches(villagesByCluster, incoming, amMaps, h);
                 const surpW = launches.reduce((a,l) => a+l.wood, 0);
                 const demW  = villagesByCluster.flat().reduce((a,v) => a+(amMaps[h-1]?.get(v.coord)?.wood||0), 0);
-                if (demW > surpW) { amHours = Math.max(0, h - 1); break; }
+                if (demW > surpW) {
+                    amHours = Math.max(0, h - 1); // FIX: was h (off-by-one)
+                    break;
+                }
             }
         }
 
@@ -998,15 +1018,14 @@ window._rbStart = async () => {
     }
 };
 
-// FIX B (v2.1): ajaxaction muss "send_res" sein, nicht "call" (Truppenaktion)
+// ─── Send resources ────────────────────────────────────────────────────────────
 window._rbSend = (sourceId, targetId, wood, stone, iron, rowId) => {
     document.getElementById(rowId)?.remove();
-    TribalWars.post("market",
-        { village: sourceId, ajaxaction:"send_res", h: window.csrf_token },
-        { [`resource[${sourceId}][wood]`]:wood, [`resource[${sourceId}][stone]`]:stone,
-          [`resource[${sourceId}][iron]`]:iron, target_village: targetId },
-        res => { UI.SuccessMessage(res.success || "Sent!", 800); },
-        err => console.error(err)
+    $.post(
+        `/game.php?village=${sourceId}&screen=market&ajaxaction=send_res&h=${csrf_token}`,
+        { target_village: targetId, wood, stone, iron },
+        res => { UI.SuccessMessage(res?.success || "Sent!", 800); },
+        "json"
     );
 };
 
@@ -1016,33 +1035,45 @@ window._rbSend = (sourceId, targetId, wood, stone, iron, rowId) => {
 function renderResults(launches, clusterStats, villages, incoming, clusters) {
     const div = document.getElementById("rbpro_results");
 
-    // Gleiche Sender-Empfänger-Paare zusammenfassen
+    // Merge multi-send to same pair into one row
     const merged = new Map();
     for (const l of launches) {
         const k = l.id_origin + "_" + l.id_destination;
-        if (!merged.has(k)) { merged.set(k, {...l}); }
-        else {
+        if (!merged.has(k)) {
+            merged.set(k, {...l});
+        } else {
             const e = merged.get(k);
             e.wood += l.wood; e.stone += l.stone; e.iron += l.iron; e.total += l.total;
+            // distance stays the same (same pair, same distance)
         }
     }
     const rows = [...merged.values()].sort((a,b) => a.distance - b.distance);
 
-    // Post-Transfer-Zustand vorberechnen
+    // FIX: precompute post-transfer state once (O(V+R)) instead of O(V×R) per popup open
     const postState = new Map();
     villages.forEach(v => {
         const inc = incoming.get(v.coord) || {wood:0,stone:0,iron:0};
-        postState.set(v.id, { w: v.wood+inc.wood, s: v.stone+inc.stone, fe: v.iron+inc.iron });
+        postState.set(v.id, {
+            w:  v.wood  + inc.wood,
+            s:  v.stone + inc.stone,
+            fe: v.iron  + inc.iron
+        });
     });
     rows.forEach(r => {
-        if (postState.has(r.id_origin))      { const p = postState.get(r.id_origin);      p.w -= r.wood; p.s -= r.stone; p.fe -= r.iron; }
-        if (postState.has(r.id_destination)) { const p = postState.get(r.id_destination); p.w += r.wood; p.s += r.stone; p.fe += r.iron; }
+        if (postState.has(r.id_origin)) {
+            const p = postState.get(r.id_origin);
+            p.w -= r.wood; p.s -= r.stone; p.fe -= r.iron;
+        }
+        if (postState.has(r.id_destination)) {
+            const p = postState.get(r.id_destination);
+            p.w += r.wood; p.s += r.stone; p.fe += r.iron;
+        }
     });
 
     const totalW = villages.reduce((a,v) => a+v.wood,  0);
     const totalS = villages.reduce((a,v) => a+v.stone, 0);
     const totalI = villages.reduce((a,v) => a+v.iron,  0);
-    const n      = villages.length;
+    const n = villages.length;
 
     let html = `
     <div class="rbpro-section">
@@ -1063,8 +1094,13 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
     </div>
     <div class="rbpro-scroll" style="max-height:460px;overflow-y:auto">
     <table class="rbpro-table" id="rbpro_sendtable">
-      <tr><th>#</th><th>${L.source}</th><th>${L.target}</th>
-          <th>${L.distance}</th><th>Total</th><th>🪵</th><th>🪨</th><th>⚙</th><th></th></tr>`;
+      <tr>
+        <th>#</th>
+        <th>${L.source}</th><th>${L.target}</th>
+        <th>${L.distance}</th><th>Total</th>
+        <th>🪵</th><th>🪨</th><th>⚙</th>
+        <th></th>
+      </tr>`;
 
     rows.forEach((r, i) => {
         const rowId = "rbpro_row_" + i;
@@ -1072,19 +1108,23 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
           <td>${i+1}</td>
           <td><a class="rbpro-link" href="${urlBase}info_village&id=${r.id_origin}">${r.name_origin}</a></td>
           <td><a class="rbpro-link" href="${urlBase}info_village&id=${r.id_destination}">${r.name_destination}</a></td>
-          <td>${r.distance.toFixed(1)}</td><td>${fmt(r.total)}</td>
+          <td>${r.distance.toFixed(1)}</td>
+          <td>${fmt(r.total)}</td>
           <td>${fmt(r.wood)}</td><td>${fmt(r.stone)}</td><td>${fmt(r.iron)}</td>
           <td><button class="rbpro-btn-send"
               onclick="window._rbSend('${r.id_origin}','${r.id_destination}',${r.wood},${r.stone},${r.iron},'${rowId}')">
-              ${L.send}</button></td>
+              ${L.send}
+          </button></td>
         </tr>`;
     });
+
     html += `</table></div>`;
     div.innerHTML = html;
     div.style.display = "";
 
     window._rbData = { rows, clusterStats, villages, incoming, clusters, postState };
 
+    // FIX: addEventListener instead of window.onkeydown (no more game handler override)
     if (window._rbKeyHandler) window.removeEventListener("keydown", window._rbKeyHandler);
     window._rbKeyHandler = e => {
         if (e.key === "Enter") {
@@ -1113,21 +1153,22 @@ window._rbShowClusters = () => {
 
 window._rbShowResult = () => {
     if (!window._rbData) return;
-    const { villages, postState } = window._rbData;
+    const { villages, postState } = window._rbData;  // FIX: use precomputed postState
     let h = `<div style="max-height:600px;overflow-y:auto"><table class="rbpro-table">
       <tr><th>Village</th><th>Pts</th><th>Priority</th><th>🪵 after</th><th>🪨 after</th><th>⚙ after</th><th>WH cap</th></tr>`;
+
     villages.forEach(v => {
         const ps  = postState.get(v.id) || {w:0,s:0,fe:0};
-        // OPT 7: priority direkt aus getTargetAmounts, kein getrennter getVillagePriority-Aufruf
-        const { priority } = getTargetAmounts(v, 0, 0, 0);
-        const priColor = priority === "small" ? "#4eff4e" : priority === "builtin" ? "#ff9944" : "inherit";
+        const w = ps.w, s = ps.s, fe = ps.fe;
+        const pri      = getVillagePriority(v);
+        const priColor = pri === "small" ? "#4eff4e" : pri === "builtin" ? "#ff9944" : "inherit";
         h += `<tr>
           <td><a class="rbpro-link" href="${urlBase}info_village&id=${v.id}">${v.coord}</a></td>
           <td>${fmt(v.points)}</td>
-          <td style="color:${priColor}">${priority}</td>
-          <td style="background:${ps.w  < 0?"#6a0000":"inherit"}">${fmt(Math.max(0,ps.w))}</td>
-          <td style="background:${ps.s  < 0?"#6a0000":"inherit"}">${fmt(Math.max(0,ps.s))}</td>
-          <td style="background:${ps.fe < 0?"#6a0000":"inherit"}">${fmt(Math.max(0,ps.fe))}</td>
+          <td style="color:${priColor}">${pri}</td>
+          <td style="background:${w  < 0?"#6a0000":"inherit"}">${fmt(Math.max(0,w))}</td>
+          <td style="background:${s  < 0?"#6a0000":"inherit"}">${fmt(Math.max(0,s))}</td>
+          <td style="background:${fe < 0?"#6a0000":"inherit"}">${fmt(Math.max(0,fe))}</td>
           <td>${fmt(v.capacity)}</td>
         </tr>`;
     });
@@ -1139,4 +1180,4 @@ window._rbShowResult = () => {
 // INIT
 // ═══════════════════════════════════════════════════════════════════════════════
 buildUI();
-UI.SuccessMessage("ResourceBalancer PRO v2.2 loaded — configure & click Start", 2000);
+UI.SuccessMessage("ResourceBalancer PRO v2 loaded — configure & click Start", 2000);
