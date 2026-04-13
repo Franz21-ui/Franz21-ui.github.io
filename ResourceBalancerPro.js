@@ -1031,42 +1031,33 @@ window._rbStart = async () => {
 };
 
 // ─── Send resources ────────────────────────────────────────────────────────────
+// FIX: Use TribalWars.post() — the TW internal API wrapper.
+// Both original scripts (Shinko + Madalin) use this, NOT raw $.ajax.
+// It automatically adds the CSRF token and uses the correct market endpoint.
+// Wrong approach: $.ajax to /game.php?...&ajaxaction=send_res with target_village
+// Correct approach: TribalWars.post("market", {ajaxaction:"map_send", village:src}, {target_id:..., wood:..., ...})
 window._rbSend = (sourceId, targetId, wood, stone, iron, rowId) => {
     const row = document.getElementById(rowId);
     if (row) row.style.opacity = "0.4";
 
-    $.ajax({
-        url:      `/game.php?village=${sourceId}&screen=market&ajaxaction=send_res`,
-        type:     'POST',
-        dataType: 'text',
-        data: {
-            target_village: targetId,
-            wood:           wood,
-            stone:          stone,
-            iron:           iron,
-            // FIX: fallback csrf — game_data.csrf for newer TW versions
-            h:              getCsrf(),
-        },
-    }).done((raw) => {
-        try {
-            const r = JSON.parse(raw);
-            if (r.error) {
-                if (row) row.style.opacity = "1";
-                UI.ErrorMessage(r.error, 2500);
-            } else {
-                if (row) row.remove();
-                UI.SuccessMessage(r.success || L.done, 800);
-            }
-        } catch {
-            // TW responded with HTML (redirect to market page) → resources sent
+    TribalWars.post(
+        "market",
+        { ajaxaction: "map_send", village: sourceId },
+        { target_id: targetId, wood: wood, stone: stone, iron: iron },
+        function(response) {
+            // Erfolg
             if (row) row.remove();
-            UI.SuccessMessage(L.done, 800);
+            const msg = response?.message || response?.success || L.done;
+            UI.SuccessMessage(msg, 800);
+        },
+        function(error) {
+            // Fehler
+            if (row) row.style.opacity = "1";
+            const msg = error?.message || error?.error || JSON.stringify(error);
+            console.error("[RBPro] Sende-Fehler:", error);
+            UI.ErrorMessage(msg || "Fehler beim Senden", 3000);
         }
-    }).fail((xhr) => {
-        if (row) row.style.opacity = "1";
-        console.error('[RBPro] Send error:', xhr.status, xhr.responseText?.slice(0, 300));
-        UI.ErrorMessage('Fehler beim Senden (HTTP ' + xhr.status + ')', 2500);
-    });
+    );
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
