@@ -1019,14 +1019,38 @@ window._rbStart = async () => {
 };
 
 // ─── Send resources ────────────────────────────────────────────────────────────
+// FIX: h muss im POST-Body sein (nicht in der URL) damit TW den CSRF-Token akzeptiert.
+// FIX: dataType:"text" statt "json" — TW gibt je nach Version HTML oder JSON zurück.
+//      Mit "json" bricht $.post lautlos ab wenn TW HTML sendet (z.B. Weiterleitung).
 window._rbSend = (sourceId, targetId, wood, stone, iron, rowId) => {
     document.getElementById(rowId)?.remove();
-    $.post(
-        `/game.php?village=${sourceId}&screen=market&ajaxaction=send_res&h=${csrf_token}`,
-        { target_village: targetId, wood, stone, iron },
-        res => { UI.SuccessMessage(res?.success || "Sent!", 800); },
-        "json"
-    );
+    $.ajax({
+        url:      `/game.php?village=${sourceId}&screen=market&ajaxaction=send_res`,
+        type:     'POST',
+        dataType: 'text',
+        data: {
+            target_village: targetId,
+            wood:           wood,
+            stone:          stone,
+            iron:           iron,
+            h:              csrf_token,
+        },
+    }).done((raw) => {
+        try {
+            const r = JSON.parse(raw);
+            if (r.error) {
+                UI.ErrorMessage(r.error, 2500);
+            } else {
+                UI.SuccessMessage(r.success || L.done, 800);
+            }
+        } catch {
+            // TW hat HTML geantwortet (Weiterleitung zur Markt-Seite) → Rohstoffe gesendet
+            UI.SuccessMessage(L.done, 800);
+        }
+    }).fail((xhr) => {
+        console.error('[RBPro] _rbSend Fehler:', xhr.status, xhr.responseText?.slice(0, 300));
+        UI.ErrorMessage('Fehler beim Senden (HTTP ' + xhr.status + ')', 2500);
+    });
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
