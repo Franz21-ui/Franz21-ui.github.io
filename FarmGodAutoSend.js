@@ -196,11 +196,18 @@ window.FarmGod.Library = (function () {
   // OPT 1: Paralleles Seiten-Laden
   // Erste Seite laden → Gesamtanzahl bestimmen → alle restlichen Seiten gleichzeitig laden.
   // twLib verteilt die Requests automatisch auf 5 Queues.
+  //
+  // BUGFIX: jQuery Deferred ≠ native Promise — in jQuery < 3.x ignoriert Promise.all
+  // den Rückgabewert eines Deferreds im .then()-Callback und löst sofort auf.
+  // Lösung: jqToPromise() konvertiert jeden twLib.ajax()-Aufruf zu einem nativen Promise,
+  // damit Promise.all() korrekt auf alle Seiten wartet.
+  const jqToPromise = (deferred) => new Promise((res, rej) => deferred.then(res, rej));
+
   const processAllPages = function (url, processorFn) {
     const startPage = url.match('am_farm') || url.match('scavenge_mass') ? 0 : -1;
     const pageKey   = url.match('am_farm') ? 'Farm_page' : 'page';
 
-    return twLib.ajax({ url: `${url}&${pageKey}=${startPage}` }).then((html) => {
+    return jqToPromise(twLib.ajax({ url: `${url}&${pageKey}=${startPage}` })).then((html) => {
       const $html = $(html);
       processorFn($html);
 
@@ -229,13 +236,14 @@ window.FarmGod.Library = (function () {
 
       if (total <= startPage) return;
 
-      // Alle restlichen Seiten parallel laden und verarbeiten
+      // Alle restlichen Seiten parallel laden — jeder Aufruf ist ein nativer Promise
       const remaining = [];
       for (let p = startPage + 1; p <= total; p++) remaining.push(p);
 
       return Promise.all(
         remaining.map((p) =>
-          twLib.ajax({ url: `${url}&${pageKey}=${p}` }).then((h) => processorFn($(h)))
+          jqToPromise(twLib.ajax({ url: `${url}&${pageKey}=${p}` }))
+            .then((h) => processorFn($(h)))
         )
       );
     });
