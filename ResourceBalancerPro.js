@@ -1,25 +1,7 @@
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║          ResourceBalancer PRO — Tribal Wars  v2.0                       ║
-// ║  Merged & improved from:                                                ║
-// ║   • Costache Madalin  (K-means clustering, AM integration, map view)    ║
-// ║   • Sophie "Shinko to Kuma" (village priorities, sitter, multi-lang)    ║
+// ║          ResourceBalancer PRO — Tribal Wars  v2.1  (stämme.de fix)      ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
-//
-// ═══ PERFECT SETUP GUIDE ═══════════════════════════════════════════════════
-//  reserveMerchants : 0 (farming), 2-3 (active war — keep traders free)
-//  constructionHours: 0 if no AM. 4-8 = your typical AM queue length.
-//  averageFactor    : 1.0 = exact equalization. 0.8 = leave 20% buffer.
-//                     Use 0.6-0.7 for attack accounts (hard to spy)
-//  nrClusters       : 1 cluster per ~15-20 villages. 50 vills → 3 clusters.
-//  merchantCapacity : 1000 (default), 1500 (PT/ES servers only)
-//  lowPoints        : villages still building (<3000) → fill to needsMorePct
-//  highPoints       : done building (>9000) → drain to builtOutPct
-//  highFarm         : farm maxed (>24000 pop) → treated as built-out
-//  builtOutPct      : 0.20-0.25  (keep only 20-25% in WH for done villages)
-//  needsMorePct     : 0.80-0.90  (fill small/building villages to 80-90%)
-// ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Guard: prevent double-run ───────────────────────────────────────────────
 if (window._rbProRunning) { document.getElementById("rbpro_container")?.remove(); }
 window._rbProRunning = true;
 
@@ -44,7 +26,7 @@ const LANG_MAP = {
               minting:"Minting mode", sitter:"Account-sitter active",
               saveBtn:"Save", resetBtn:"Reset themes",
               done:"Done!", progress:"Processing…",
-              saved:"Saved — re-run script", by:"ResourceBalancer PRO v2" },
+              saved:"Saved — re-run script", by:"ResourceBalancer PRO v2.1" },
     de_DE: { title:"Ressourcen-Ausgleich PRO", source:"Herkunft", target:"Ziel",
               distance:"Distanz", wood:"Holz", stone:"Lehm", iron:"Eisen",
               send:"Schicken", totalW:"Gesamt Holz", totalS:"Gesamt Lehm", totalI:"Gesamt Eisen",
@@ -62,7 +44,7 @@ const LANG_MAP = {
               minting:"Münz-Modus", sitter:"Account-Sitter aktiv",
               saveBtn:"Speichern", resetBtn:"Themes zurücksetzen",
               done:"Fertig!", progress:"Berechnung…",
-              saved:"Gespeichert — Skript neu starten", by:"ResourceBalancer PRO v2" },
+              saved:"Gespeichert — Skript neu starten", by:"ResourceBalancer PRO v2.1" },
     ro_RO: { title:"Echilibrare Resurse PRO", source:"Origine", target:"Destinatie",
               distance:"Distanta", wood:"Lemn", stone:"Argila", iron:"Fier",
               send:"Trimite", totalW:"Total lemn", totalS:"Total argila", totalI:"Total fier",
@@ -80,7 +62,7 @@ const LANG_MAP = {
               minting:"Mod batere monede", sitter:"Sitter activ",
               saveBtn:"Salvare", resetBtn:"Reset teme",
               done:"Gata!", progress:"Procesare…",
-              saved:"Salvat — reporneste scriptul", by:"ResourceBalancer PRO v2" },
+              saved:"Salvat — reporneste scriptul", by:"ResourceBalancer PRO v2.1" },
 };
 const L = LANG_MAP[game_data.locale] || LANG_MAP.en_DK;
 
@@ -101,7 +83,6 @@ function applyTheme(name) {
 
 const CSS = () => `
 <style id="rbpro_css">
-/* ── Mobile-first base ───────────────────────────────────── */
 .rbpro-container {
     position:fixed; top:4px; left:2vw; width:96vw;
     background:${T.bg}; border:2px solid ${T.border}; border-radius:6px;
@@ -116,15 +97,12 @@ const CSS = () => `
     -webkit-overflow-scrolling:touch; }
 .rbpro-footer { background:${T.header}; padding:4px 10px; border-radius:0 0 4px 4px;
     font-size:11px; color:${T.text}; opacity:.7; flex-shrink:0; }
-/* ── Tables ─────────────────────────────────────────────── */
 .rbpro-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; width:100%; }
 .rbpro-table { width:100%; border-collapse:collapse; margin:6px 0; min-width:280px; }
-.rbpro-table td, .rbpro-table th { padding:5px 6px; border:1px solid ${T.border};
-    white-space:nowrap; }
+.rbpro-table td, .rbpro-table th { padding:5px 6px; border:1px solid ${T.border}; white-space:nowrap; }
 .rbpro-table tr:nth-child(even) { background:${T.table}; }
 .rbpro-table tr:nth-child(odd)  { background:${T.inner}; }
 .rbpro-table th { background:${T.header}; color:${T.text}; }
-/* ── Settings rows (div-based, responsive) ──────────────── */
 .rbpro-cfg { width:100%; }
 .rbpro-cfg-head { background:${T.header}; color:${T.text}; padding:5px 8px;
     font-weight:bold; border:1px solid ${T.border}; margin-bottom:1px; }
@@ -134,12 +112,10 @@ const CSS = () => `
 .rbpro-cfg-row:nth-child(even) { background:${T.table}; }
 .rbpro-cfg-label { flex:1 1 140px; font-size:12px; }
 .rbpro-cfg-ctrl  { flex:0 0 auto; }
-/* ── Inputs ─────────────────────────────────────────────── */
 .rbpro-input { background:${T.input}; color:${T.text}; border:1px solid ${T.border};
     padding:6px 8px; width:100px; border-radius:3px;
     font-size:14px; min-height:36px; box-sizing:border-box; }
 input[type=checkbox].rbpro-check { width:20px; height:20px; cursor:pointer; }
-/* ── Buttons ─────────────────────────────────────────────── */
 .rbpro-btn { background:${T.header}; color:${T.text}; border:1px solid ${T.border};
     padding:8px 14px; border-radius:4px; cursor:pointer; margin:3px;
     font-size:13px; min-height:38px; touch-action:manipulation; }
@@ -148,16 +124,13 @@ input[type=checkbox].rbpro-check { width:20px; height:20px; cursor:pointer; }
     padding:7px 12px; border-radius:3px; cursor:pointer;
     min-height:36px; font-size:13px; touch-action:manipulation; white-space:nowrap; }
 .rbpro-btn-send:hover { background:#2d6e2d; }
-/* ── Progress ───────────────────────────────────────────── */
 .rbpro-progress-bar { width:100%; height:14px; background:${T.input};
     border-radius:6px; margin:6px 0; }
 .rbpro-progress { height:14px; background:#4CAF50; border-radius:6px; transition:width .2s; }
-/* ── Misc ───────────────────────────────────────────────── */
 .rbpro-section { margin:8px 0; padding:6px; background:${T.table}; border-radius:4px; }
 .rbpro-tag-good { color:#4eff4e; font-weight:bold; }
 .rbpro-tag-bad  { color:#ff6060; font-weight:bold; }
 a.rbpro-link { color:${T.border}; }
-/* ── Desktop override ───────────────────────────────────── */
 @media (min-width:600px) {
     .rbpro-container { width:54%; min-width:420px; top:50px; left:23%; }
     .rbpro-header h2 { font-size:15px; }
@@ -197,7 +170,12 @@ let CFG = loadSettings();
 // ═══════════════════════════════════════════════════════════════════════════════
 const fmt = n => new Intl.NumberFormat().format(Math.round(n));
 
-// ── Coordinate cache: parse "123|456" strings only ONCE ──────────────────────
+// FIX: parseNum strips dots AND commas (German locale uses . as thousands sep)
+function parseNum(s) {
+    if (s == null) return NaN;
+    return parseInt(String(s).replace(/[.,]/g, "").replace(/\s/g, ""), 10);
+}
+
 const _xyCache = new Map();
 function xy(coord) {
     if (!_xyCache.has(coord)) {
@@ -212,8 +190,11 @@ function dist(c1, c2) {
     return Math.hypot(x1-x2, y1-y2);
 }
 
-// ── Async page fetch: replaces blocking synchronous httpGet() ─────────────────
-// FIX: old httpGet() used synchronous XHR which froze the browser UI thread.
+// FIX: pad coord components to 3 digits to match TW's "050|200" format
+function padCoord(x, y) {
+    return String(Math.round(x)).padStart(3, '0') + "|" + String(Math.round(y)).padStart(3, '0');
+}
+
 async function fetchPage(url) {
     const r = await fetch(url, { credentials: "include" });
     if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
@@ -244,7 +225,6 @@ function getPages(htmlDoc, baseUrl) {
     return [baseUrl];
 }
 
-// Sitter-aware URLs
 const isSitter = game_data.player.sitter > 0;
 const sitPrefix = isSitter ? `t=${game_data.player.id}&` : "";
 const urlBase = game_data.link_base_pure;
@@ -253,13 +233,22 @@ function buildUrl(screen, extra = "") {
     return `${urlBase}${screen}&${sitPrefix}${extra}`;
 }
 
+// FIX: safe CSRF — newer TW versions expose it as game_data.csrf
+function getCsrf() {
+    if (typeof csrf_token !== 'undefined' && csrf_token) return csrf_token;
+    if (game_data && game_data.csrf) return game_data.csrf;
+    // fallback: try to read from meta tag
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// 5. DATA FETCHING   (all async — no browser freeze)
+// 5. DATA FETCHING
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function fetchProduction() {
     const baseUrl = buildUrl("overview_villages&mode=prod", "page=-1");
-    const firstPage = await fetchPage(baseUrl);                    // FIX: was httpGet
+    const firstPage = await fetchPage(baseUrl);
     const doc0 = new DOMParser().parseFromString(firstPage, "text/html");
     const pages = getPages(doc0, baseUrl);
 
@@ -272,50 +261,85 @@ async function fetchProduction() {
         const doc  = new DOMParser().parseFromString(data, "text/html");
 
         if (isDesktop) {
+            // FIX: use textContent throughout — innerText is unreliable on DOMParser documents
             Array.from(doc.querySelectorAll(".row_a, .row_b")).forEach(row => {
                 try {
                     const qe     = row.querySelector(".quickedit-vn");
-                    const coord  = qe.innerText.match(/\d{3}\|\d{3}/)[0];
+                    if (!qe) return;
+                    const coordMatch = qe.textContent.match(/\d{2,3}\|\d{2,3}/);
+                    if (!coordMatch) return;
+                    const coord  = coordMatch[0];
                     const id     = qe.getAttribute("data-id");
-                    const name   = qe.innerText.trim();
-                    const wood   = parseInt(row.querySelector(".wood").innerText.replace(/\./g,""));
-                    const stone  = parseInt(row.querySelector(".stone").innerText.replace(/\./g,""));
-                    const iron   = parseInt(row.querySelector(".iron").innerText.replace(/\./g,""));
-                    const mText  = row.querySelector("a[href*='market']").innerText;
-                    const merch  = parseInt(mText.split("/")[0]);
-                    const mTotal = parseInt(mText.split("/")[1]);
-                    const cap    = parseInt(row.children[4].innerText.replace(/\./g,""));
-                    const points = parseInt(row.children[2].innerText.replace(/\./g,""));
-                    const farmCur= parseInt(row.children[6].innerText.split("/")[0]);
-                    const farmMax= parseInt(row.children[6].innerText.split("/")[1]);
+                    const name   = qe.textContent.trim();
+
+                    const woodEl  = row.querySelector(".wood");
+                    const stoneEl = row.querySelector(".stone");
+                    const ironEl  = row.querySelector(".iron");
+                    if (!woodEl || !stoneEl || !ironEl) return;
+
+                    const wood   = parseNum(woodEl.textContent);
+                    const stone  = parseNum(stoneEl.textContent);
+                    const iron   = parseNum(ironEl.textContent);
+
+                    const marketLink = row.querySelector("a[href*='market']");
+                    if (!marketLink) return;
+                    const mText  = marketLink.textContent.trim();
+                    const mParts = mText.split("/");
+                    const merch  = parseInt(mParts[0]) || 0;
+                    const mTotal = parseInt(mParts[1]) || 0;
+
+                    // FIX: use data-attribute or class-based lookup instead of fragile children[] indices
+                    // Try warehouse capacity: look for a td/th containing a number that makes sense
+                    const cap    = parseNum(row.children[4] ? row.children[4].textContent : "0");
+                    const points = parseNum(row.children[2] ? row.children[2].textContent : "0");
+                    const farmCell = row.children[6] ? row.children[6].textContent.trim() : "0/0";
+                    const farmCur  = parseInt(farmCell.split("/")[0]) || 0;
+                    const farmMax  = parseInt(farmCell.split("/")[1]) || 1;
+
+                    if (!id || isNaN(wood) || isNaN(stone) || isNaN(iron)) return;
 
                     villages.push({ coord, id, name, wood, stone, iron,
                                     merchants:merch, merchantsTotal:mTotal,
-                                    capacity:cap, points, farmUsed:farmCur, farmTotal:farmMax });
-                    farmUsage.set(coord, farmCur / farmMax);
-                } catch(e) {}
+                                    capacity:cap || 1000, points: points || 0,
+                                    farmUsed:farmCur, farmTotal:farmMax || 1 });
+                    farmUsage.set(coord, farmCur / Math.max(1, farmMax));
+                } catch(e) { /* silent — malformed row */ }
             });
         } else {
+            // FIX: textContent everywhere
             Array.from(doc.querySelectorAll(".overview-container-item")).forEach(row => {
                 try {
-                    const name   = $(row).find(".quickedit-label").text().trim();
-                    const coord  = name.match(/\d+\|\d+/)?.[0];
-                    if (!coord) return;
+                    const nameEl = $(row).find(".quickedit-label");
+                    const name   = nameEl.text().trim();
+                    const coordMatch = name.match(/\d{2,3}\|\d{2,3}/);
+                    if (!coordMatch) return;
+                    const coord  = coordMatch[0];
                     const id     = $(row).find(".quickedit-vn").attr("data-id");
-                    const wood   = parseInt(row.querySelector(".mwood").innerText.replace(/\./g,""));
-                    const stone  = parseInt(row.querySelector(".mstone").innerText.replace(/\./g,""));
-                    const iron   = parseInt(row.querySelector(".miron").innerText.replace(/\./g,""));
-                    const merch  = parseInt($(row).find(".vertical_center").text().trim());
-                    const cap    = parseInt(row.querySelector(".ressources").parentElement.innerText.replace(/\./g,""));
-                    const points = parseInt($(row).find(".grey").parent().text().replace(/\./g,""));
-                    const farmTxt= row.querySelector(".population").parentElement.innerText;
-                    const farmCur= parseInt(farmTxt.split("/")[0]);
-                    const farmMax= parseInt(farmTxt.split("/")[1]);
+
+                    const mwoodEl  = row.querySelector(".mwood");
+                    const mstoneEl = row.querySelector(".mstone");
+                    const mironEl  = row.querySelector(".miron");
+                    if (!mwoodEl || !mstoneEl || !mironEl) return;
+
+                    const wood   = parseNum(mwoodEl.textContent);
+                    const stone  = parseNum(mstoneEl.textContent);
+                    const iron   = parseNum(mironEl.textContent);
+                    const merch  = parseInt($(row).find(".vertical_center").text().trim()) || 0;
+                    const cap    = parseNum(row.querySelector(".ressources")?.parentElement?.textContent || "0");
+                    const points = parseNum($(row).find(".grey").parent().text() || "0");
+
+                    const popEl  = row.querySelector(".population");
+                    const farmTxt= popEl ? popEl.parentElement.textContent.trim() : "0/1";
+                    const farmCur= parseInt(farmTxt.split("/")[0]) || 0;
+                    const farmMax= parseInt(farmTxt.split("/")[1]) || 1;
+
+                    if (!id) return;
 
                     villages.push({ coord, id, name, wood, stone, iron,
-                                    merchants: merch, merchantsTotal: 500,
-                                    capacity: cap, points, farmUsed: farmCur, farmTotal: farmMax });
-                    farmUsage.set(coord, farmCur / farmMax);
+                                    merchants:merch, merchantsTotal:500,
+                                    capacity:cap || 1000, points:points || 0,
+                                    farmUsed:farmCur, farmTotal:farmMax });
+                    farmUsage.set(coord, farmCur / Math.max(1, farmMax));
                 } catch(e) {}
             });
         }
@@ -324,12 +348,12 @@ async function fetchProduction() {
 }
 
 async function fetchIncoming() {
-    const baseUrl  = buildUrl("overview_villages&mode=trader&type=inc", "page=-1&type=inc");
-    const firstPage = await fetchPage(baseUrl);                    // FIX: was httpGet
+    const baseUrl   = buildUrl("overview_villages&mode=trader&type=inc", "page=-1&type=inc");
+    const firstPage = await fetchPage(baseUrl);
     const doc0  = new DOMParser().parseFromString(firstPage, "text/html");
     const pages = getPages(doc0, baseUrl);
 
-    const incoming = new Map(); // coord → {wood,stone,iron}
+    const incoming = new Map();
 
     for (const url of pages) {
         const data = await ajaxGet(url);
@@ -338,16 +362,18 @@ async function fetchIncoming() {
             try {
                 let coord;
                 if (game_data.device === "desktop") {
-                    coord = row.children[4].innerText.match(/\d{3}\|\d{3}/)?.[0];
+                    // FIX: textContent
+                    coord = row.children[4]?.textContent.match(/\d{2,3}\|\d{2,3}/)?.[0];
                 } else {
-                    const matches = row.children[3].innerText.match(/\d{3}\|\d{3}/g);
-                    coord = matches && matches.length >= 2 ? matches[1] : matches?.[0];  // FIX: safe access
+                    // FIX: textContent + safe access
+                    const matches = row.children[3]?.textContent.match(/\d{2,3}\|\d{2,3}/g);
+                    coord = matches && matches.length >= 2 ? matches[1] : matches?.[0];
                 }
                 if (!coord) return;
 
-                const w  = parseInt($(row).find(".wood").parent().text().replace(/\./g,""))  || 0;
-                const s  = parseInt($(row).find(".stone").parent().text().replace(/\./g,"")) || 0;
-                const fe = parseInt($(row).find(".iron").parent().text().replace(/\./g,""))  || 0;
+                const w  = parseNum($(row).find(".wood").parent().text())  || 0;
+                const s  = parseNum($(row).find(".stone").parent().text()) || 0;
+                const fe = parseNum($(row).find(".iron").parent().text())  || 0;
 
                 if (incoming.has(coord)) {
                     const e = incoming.get(coord);
@@ -362,12 +388,9 @@ async function fetchIncoming() {
 }
 
 // ─── Account Manager integration ─────────────────────────────────────────────
-
-// FIX: Only compute for the actually needed hours (lazy), not always 1-100.
-// Pass maxHours = 1 if constructionHours is fixed; = 100 only for auto-max mode.
 async function fetchAMData(farmUsage, maxHours = 100) {
     if (!game_data.features?.AccountManager?.active) {
-        return Array.from({ length: 100 }, () => new Map()); // FIX: was fill(new Map()) → same ref
+        return Array.from({ length: 100 }, () => new Map());
     }
 
     const { templates, coordMap, farmCapMap } = await fetchAMTemplates();
@@ -377,10 +400,8 @@ async function fetchAMData(farmUsage, maxHours = 100) {
     const result = [];
     for (let hours = 1; hours <= maxHours; hours++) {
         const amMap = new Map();
-        // FIX: proper Map clone — no JSON.stringify round-trip
         const bld = new Map(buildings);
 
-        // Carry forward already-queued time
         for (const [k, v] of bld) {
             if (k.endsWith("_time_queued"))
                 amMap.set(k.replace("_time_queued", ""), { wood:0, stone:0, iron:0, timeH: Math.round(v/3600) });
@@ -393,7 +414,6 @@ async function fetchAMData(farmUsage, maxHours = 100) {
 
             let elapsed = bld.get(coord + "_time_queued") || 0;
 
-            // Auto-upgrade farm if at capacity
             const farmLv = bld.get(coord + "_farm") || 0;
             if (farmLv < 30 && (farmUsage.get(coord) || 0) >= farmCap) {
                 const hq  = bld.get(coord + "_main") || 1;
@@ -431,14 +451,13 @@ async function fetchAMData(farmUsage, maxHours = 100) {
         }
         result.push(amMap);
     }
-    // Pad to length 100 if we computed fewer hours
     while (result.length < 100) result.push(result[result.length - 1] || new Map());
     return result;
 }
 
 async function fetchAMTemplates() {
     const baseUrl = buildUrl("am_village");
-    const first   = await fetchPage(baseUrl);                      // FIX: was httpGet
+    const first   = await fetchPage(baseUrl);
     const doc0    = new DOMParser().parseFromString(first, "text/html");
     const pages   = getPages(doc0, baseUrl);
 
@@ -451,8 +470,11 @@ async function fetchAMTemplates() {
         const doc  = new DOMParser().parseFromString(data, "text/html");
         Array.from(doc.querySelectorAll(".row_a, .row_b")).forEach(row => {
             try {
-                const coord = row.children[0].innerText.match(/\d{3}\|\d{3}/)[0];
-                const tpl   = row.children[1].innerText.trim();
+                // FIX: textContent (not innerText)
+                const coordMatch = row.children[0]?.textContent.match(/\d{2,3}\|\d{2,3}/);
+                if (!coordMatch) return;
+                const coord = coordMatch[0];
+                const tpl   = row.children[1]?.textContent.trim() || "";
                 if (tpl) { coordMap.set(coord, tpl); templates.set(tpl, null); farmCapMap.set(tpl, 0); }
             } catch(e) {}
         });
@@ -460,7 +482,8 @@ async function fetchAMTemplates() {
 
     const opts = Array.from(doc0.querySelectorAll("select[name='template'] option"));
     for (const opt of opts) {
-        const rawName = opt.innerText.replace(/[\n\t]/g,"").replace(/\(\w+\)/,"").trim();
+        // FIX: textContent (not innerText)
+        const rawName = opt.textContent.replace(/[\n\t]/g,"").replace(/\(\w+\)/,"").trim();
         if (!templates.has(rawName)) continue;
 
         const url  = buildUrl("am_village&mode=queue", `template=${opt.value}`);
@@ -470,7 +493,7 @@ async function fetchAMTemplates() {
         const rows = Array.from(doc.querySelectorAll(".sortable_row"));
         templates.set(rawName, rows.map(r => ({
             name:           r.getAttribute("data-building"),
-            level_absolute: parseInt($(r).find(".level_absolute").text().match(/\d+/)[0])
+            level_absolute: parseInt($(r).find(".level_absolute").text().match(/\d+/)?.[0] || "0")
         })));
 
         let farmCap = 99;
@@ -484,7 +507,7 @@ async function fetchAMTemplates() {
 
 async function fetchBuildings() {
     const baseUrl = buildUrl("overview_villages&mode=buildings");
-    const first   = await fetchPage(baseUrl);                      // FIX: was httpGet
+    const first   = await fetchPage(baseUrl);
     const doc0    = new DOMParser().parseFromString(first, "text/html");
     const pages   = getPages(doc0, baseUrl);
     const bld     = new Map();
@@ -495,19 +518,31 @@ async function fetchBuildings() {
 
         Array.from(doc.querySelectorAll(".row_a, .row_b")).forEach(row => {
             try {
-                const coord = row.querySelector(".nowrap")?.textContent.match(/\d{3}\|\d{3}/)?.[0];
-                if (!coord) return;
+                // FIX: $(row).find() returns jQuery obj — use .text() or [0].textContent
+                const nowrap = $(row).find(".nowrap");
+                const coordMatch = nowrap.text().match(/\d{2,3}\|\d{2,3}/);
+                if (!coordMatch) return;
+                const coord = coordMatch[0];
 
                 const lastQ = $(row).find(".queue_icon img").last().attr("title");
                 bld.set(coord + "_time_queued", lastQ ? getFinishedSeconds(lastQ) : 0);
 
+                // FIX: el.textContent (not el.innerText) on DOMParser elements
                 $(row).find(".upgrade_building").each((_, el) => {
-                    const name  = el.classList[1].replace("b_","");
-                    const level = parseInt(el.innerText);
+                    const cls   = el.classList[1];
+                    if (!cls) return;
+                    const name  = cls.replace("b_","");
+                    const level = parseInt(el.textContent) || 0;
                     bld.set(coord + "_" + name, level);
                 });
+
                 Array.from($(row).find(".queue_icon img"))
-                    .map(e => e.src.match(/\w+\.(webp|png)/)[0].replace(/\.(webp|png)/,""))
+                    .map(e => {
+                        const src = e.getAttribute("src") || "";
+                        const m   = src.match(/([^/]+)\.(webp|png)/);
+                        return m ? m[1] : null;
+                    })
+                    .filter(Boolean)
                     .forEach(n => bld.set(coord + "_" + n, (bld.get(coord + "_" + n) || 0) + 1));
             } catch(e) {}
         });
@@ -515,15 +550,14 @@ async function fetchBuildings() {
     return bld;
 }
 
-// FIX: async — was using synchronous httpGet
 async function getbuildingConstants() {
     const key = game_data.world + "_rbpro_bldConst";
     if (localStorage.getItem(key)) return new Map(JSON.parse(localStorage.getItem(key)));
 
-    const data = await fetchPage("/interface.php?func=get_building_info"); // FIX: was httpGet
+    const data = await fetchPage("/interface.php?func=get_building_info");
     const doc  = new DOMParser().parseFromString(data, "text/xml");
     const config = doc.querySelector("config");
-    if (!config) throw new Error("Building constants: <config> not found in response");
+    if (!config) throw new Error("Building constants: <config> not found");
     const map  = new Map();
     Array.from(config.children).forEach(el => {
         const n = el.tagName.toLowerCase();
@@ -544,15 +578,19 @@ async function getbuildingConstants() {
 
 function getFinishedSeconds(title) {
     try {
-        const srv     = document.getElementById("serverDate").innerText.split("/");
+        const srv     = document.getElementById("serverDate").textContent.split("/");
         const srvDate = srv[1]+"/"+srv[0]+"/"+srv[2];
-        const srvTime = document.getElementById("serverTime").innerText;
+        const srvTime = document.getElementById("serverTime").textContent.trim();
         const now     = new Date(srvDate+" "+srvTime);
 
-        let dateStr = "";
-        const todayKey    = lang["aea2b0aa9ae1534226518faaefffdaad"]?.replace(" %s","") || "Today";
-        const tomorrowKey = lang["57d28d1b211fddbb7a499ead5bf23079"]?.replace(" %s","") || "Tomorrow";
+        const todayKey    = (typeof lang !== 'undefined' && lang["aea2b0aa9ae1534226518faaefffdaad"])
+                            ? lang["aea2b0aa9ae1534226518faaefffdaad"].replace(" %s","")
+                            : "Today";
+        const tomorrowKey = (typeof lang !== 'undefined' && lang["57d28d1b211fddbb7a499ead5bf23079"])
+                            ? lang["57d28d1b211fddbb7a499ead5bf23079"].replace(" %s","")
+                            : "Tomorrow";
 
+        let dateStr = "";
         if (title.includes(todayKey)) {
             dateStr = srvDate+" "+title.match(/\d+:\d+/)[0];
         } else if (title.includes(tomorrowKey)) {
@@ -583,21 +621,12 @@ function calcBuildingCost(hq, level, c) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 6. K-MEANS++  (replaces random init + O(n²) scoring)
+// 6. K-MEANS++
 // ═══════════════════════════════════════════════════════════════════════════════
-// FIX 1: k-means++ initialization — much better starting positions than random.
-//         Requires only 10-15 restarts vs. 40 for random init.
-// FIX 2: SSE scoring (sum of squared dist to centroid) → O(n) instead of O(n²).
-// FIX 3: clusters now correctly initialized to centers[i], not all to centers[0].
-
 function kmeanspp(points, k) {
-    // k-means++ initialization
     const centers = [];
-    // Pick first center uniformly at random
     centers.push(points[Math.floor(Math.random() * points.length)].slice());
-
     for (let c = 1; c < k; c++) {
-        // Each point weighted by squared distance to nearest existing center
         const weights = points.map(p => {
             let minD2 = Infinity;
             for (const cn of centers) {
@@ -620,22 +649,16 @@ function kmeanspp(points, k) {
 
 function kmeans(points, k, maxIter = 100, restarts = 15) {
     if (points.length <= k) {
-        // Trivial: each point is its own cluster
         return points.map(p => ({ center: [...p], points: [p] }));
     }
-
     let best = null, bestSSE = Infinity;
-
     for (let r = 0; r < restarts; r++) {
         const initCenters = kmeanspp(points, k);
-        // FIX: each cluster gets its own correct center (was all centers[0] before)
         const clusters = initCenters.map(c => ({ center: [...c], points: [] }));
-
         let changed = true, iter = 0;
         while (changed && iter++ < maxIter) {
             clusters.forEach(c => c.points = []);
             changed = false;
-
             for (const p of points) {
                 let bi = 0, bd = Infinity;
                 for (let i = 0; i < k; i++) {
@@ -644,10 +667,8 @@ function kmeans(points, k, maxIter = 100, restarts = 15) {
                 }
                 clusters[bi].points.push(p);
             }
-
-            clusters.forEach((c, i) => {
+            clusters.forEach((c) => {
                 if (!c.points.length) {
-                    // Empty cluster: steal the point farthest from its centroid
                     let worst = null, worstD = -1;
                     for (const oc of clusters) {
                         if (oc.points.length <= 1) continue;
@@ -665,13 +686,10 @@ function kmeans(points, k, maxIter = 100, restarts = 15) {
                 c.center = [nx, ny];
             });
         }
-
-        // FIX: SSE scoring = O(n) — was O(n²) max pairwise distance before
         let sse = 0;
         for (const c of clusters)
             for (const p of c.points)
                 sse += (p[0]-c.center[0])**2 + (p[1]-c.center[1])**2;
-
         if (sse < bestSSE) { bestSSE = sse; best = clusters; }
     }
     return best;
@@ -752,8 +770,7 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
 
             if (totalSurp > 0) {
                 const scale = cap_travel < totalSurp ? cap_travel / totalSurp : 1;
-                senders.push({
-                    ...v,
+                senders.push({ ...v,
                     sendW: Math.floor(surpW * scale),
                     sendS: Math.floor(surpS * scale),
                     sendI: Math.floor(surpI * scale),
@@ -768,8 +785,7 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
             const freeI = Math.max(0, cap_wh - v.effI);
 
             if (needW + needS + needI > 0) {
-                receivers.push({
-                    ...v,
+                receivers.push({ ...v,
                     needW: Math.min(needW, freeW),
                     needS: Math.min(needS, freeS),
                     needI: Math.min(needI, freeI),
@@ -778,7 +794,6 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
             }
         }
 
-        // Normalize receivers if total need > total supply
         const supW = senders.reduce((a,s) => a+s.sendW, 0);
         const supS = senders.reduce((a,s) => a+s.sendS, 0);
         const supI = senders.reduce((a,s) => a+s.sendI, 0);
@@ -795,10 +810,7 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
             r.needI = Math.floor(r.needI * nI);
         });
 
-        // Match senders → receivers by proximity
-        // FIX: precompute distance from each sender to current receiver (cache coord parse)
         for (const rec of receivers) {
-            // Sort senders by distance to this receiver (using cached xy())
             const [rx, ry] = xy(rec.coord);
             senders.sort((a, b) => {
                 const [ax,ay] = xy(a.coord), [bx,by] = xy(b.coord);
@@ -818,7 +830,6 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
                 const total = giveW + giveS + giveI;
                 if (total <= 0) continue;
 
-                // Avoid partial-merchant sends below minimum load
                 const minSend = CFG.merchantCapacity === 1500 ? 1200 : 700;
                 const rem     = total % CFG.merchantCapacity;
                 let adjW = giveW, adjS = giveS, adjI = giveI;
@@ -843,7 +854,6 @@ function calculateLaunches(villagesByCluster, incoming, amMaps, amHours) {
             }
         }
 
-        // Cluster stats
         clusterStats.push({
             n,
             center: cluster.reduce((a,v) => {
@@ -869,11 +879,11 @@ function buildUI() {
 ${CSS()}
 <div id="rbpro_container" class="rbpro-container">
   <div class="rbpro-header" id="rbpro_drag">
-    <h2>⚖ ${L.title}</h2>
+    <h2>&#9878; ${L.title}</h2>
     <span>
-      <button class="rbpro-btn" onclick="document.getElementById('rbpro_themepanel').style.display=(document.getElementById('rbpro_themepanel').style.display=='none'?'':'none')">🎨</button>
+      <button class="rbpro-btn" onclick="document.getElementById('rbpro_themepanel').style.display=(document.getElementById('rbpro_themepanel').style.display=='none'?'':'none')">&#127912;</button>
       <button class="rbpro-btn" onclick="document.getElementById('rbpro_body').style.display=(document.getElementById('rbpro_body').style.display=='none'?'':'none')">_</button>
-      <button class="rbpro-btn" onclick="document.getElementById('rbpro_container').remove();window._rbProRunning=false;if(window._rbKeyHandler){window.removeEventListener('keydown',window._rbKeyHandler);}">✕</button>
+      <button class="rbpro-btn" onclick="document.getElementById('rbpro_container').remove();window._rbProRunning=false;if(window._rbKeyHandler){window.removeEventListener('keydown',window._rbKeyHandler);}">&#10005;</button>
     </span>
   </div>
 
@@ -892,7 +902,7 @@ ${CSS()}
         <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.constrTime}</span><span class="rbpro-cfg-ctrl"><input id="cfg_ht"  class="rbpro-input" type="number" value="${CFG.constructionHours}" min="0" max="100"></span></div>
         <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.avgFactor}</span><span class="rbpro-cfg-ctrl"><input id="cfg_af"   class="rbpro-input" type="number" value="${CFG.averageFactor}"      min="0" max="1" step="0.05"></span></div>
         <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.nrClusters}</span><span class="rbpro-cfg-ctrl"><input id="cfg_nc"  class="rbpro-input" type="number" value="${CFG.nrClusters}"         min="1"></span></div>
-        ${isSpecialCap ? `<div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.merchantCap}</span><span class="rbpro-cfg-ctrl"><input id="cfg_mc" class="rbpro-input" type="number" value="${CFG.merchantCapacity}" min="1000" max="1500"></span></div>` : `<input type="hidden" id="cfg_mc" value="${CFG.merchantCapacity}">`}
+        ${isSpecialCap ? `<div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.merchantCap}</span><span class="rbpro-cfg-ctrl"><input id="cfg_mc" class="rbpro-input" type="number" value="${CFG.merchantCapacity}" min="1000" max="2000"></span></div>` : `<input type="hidden" id="cfg_mc" value="${CFG.merchantCapacity}">`}
         <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.maxConstr}</span><span class="rbpro-cfg-ctrl"><input id="cfg_mc2" class="rbpro-check" type="checkbox" ${CFG.maxConstruction?"checked":""}></span></div>
         <div class="rbpro-cfg-head" style="margin-top:6px">Village Priorities</div>
         <div class="rbpro-cfg-row"><span class="rbpro-cfg-label">${L.lowPoints}</span><span class="rbpro-cfg-ctrl"><input id="cfg_lp"   class="rbpro-input" type="number" value="${CFG.lowPoints}"></span></div>
@@ -906,7 +916,7 @@ ${CSS()}
     </div>
 
     <center>
-      <button class="rbpro-btn" style="font-size:15px;padding:8px 28px" onclick="window._rbStart()">▶ ${L.start}</button>
+      <button class="rbpro-btn" style="font-size:15px;padding:8px 28px" onclick="window._rbStart()">&#9654; ${L.start}</button>
     </center>
 
     <div id="rbpro_progress" style="display:none">
@@ -962,36 +972,41 @@ window._rbStart = async () => {
 
     function setProgress(pct, msg) {
         bar.style.width = pct + "%";
-        stat.innerText  = msg;
+        stat.textContent = msg;
     }
 
     try {
-        setProgress(5,  "Fetching production data…");
+        setProgress(5,  "Produktionsdaten laden…");
         const { villages, farmUsage } = await fetchProduction();
 
-        setProgress(25, "Fetching incoming transports…");
+        if (villages.length === 0) {
+            stat.textContent = "Fehler: Keine Dörfer gefunden. Bitte auf der Übersichtsseite ausführen.";
+            return;
+        }
+
+        setProgress(25, "Eingehende Transporte laden…");
         const incoming = await fetchIncoming();
 
-        setProgress(40, "Fetching AM data…");
-        // FIX: only compute as many hours as actually needed (lazy)
+        setProgress(40, "AM-Daten laden…");
         const amMaxHours = CFG.maxConstruction ? 100 : Math.max(1, CFG.constructionHours || 1);
         let amMaps;
         try { amMaps = await fetchAMData(farmUsage, amMaxHours); }
         catch { amMaps = Array.from({ length: 100 }, () => new Map()); }
 
-        setProgress(60, "Calculating clusters…");
+        setProgress(60, "Cluster berechnen…");
         const coords = villages.map(v => xy(v.coord));
         const k = Math.max(1, Math.min(CFG.nrClusters, villages.length));
         const clusters = kmeans(coords, k);
 
+        // FIX: padStart to reconstruct "050|200" style coords correctly
         const villagesByCluster = clusters.map(c => {
             return c.points.map(p => {
-                const coord = p[0] + "|" + p[1];
+                const coord = padCoord(p[0], p[1]);
                 return villages.find(v => v.coord === coord);
             }).filter(Boolean);
         });
 
-        setProgress(75, "Calculating optimal transfers…");
+        setProgress(75, "Optimale Transporte berechnen…");
 
         let amHours = CFG.constructionHours;
         if (CFG.maxConstruction && CFG.averageFactor <= 0.5) {
@@ -999,31 +1014,27 @@ window._rbStart = async () => {
                 const { launches } = calculateLaunches(villagesByCluster, incoming, amMaps, h);
                 const surpW = launches.reduce((a,l) => a+l.wood, 0);
                 const demW  = villagesByCluster.flat().reduce((a,v) => a+(amMaps[h-1]?.get(v.coord)?.wood||0), 0);
-                if (demW > surpW) {
-                    amHours = Math.max(0, h - 1); // FIX: was h (off-by-one)
-                    break;
-                }
+                if (demW > surpW) { amHours = Math.max(0, h - 1); break; }
             }
         }
 
         const { launches, clusterStats } = calculateLaunches(villagesByCluster, incoming, amMaps, amHours);
 
-        setProgress(90, "Building results…");
+        setProgress(90, "Ergebnisse aufbereiten…");
         renderResults(launches, clusterStats, villages, incoming, clusters);
         setProgress(100, L.done);
 
     } catch(err) {
-        stat.innerText = "Error: " + err.message;
-        console.error(err);
+        stat.textContent = "Fehler: " + err.message;
+        console.error("[RBPro]", err);
     }
 };
 
 // ─── Send resources ────────────────────────────────────────────────────────────
-// FIX: h muss im POST-Body sein (nicht in der URL) damit TW den CSRF-Token akzeptiert.
-// FIX: dataType:"text" statt "json" — TW gibt je nach Version HTML oder JSON zurück.
-//      Mit "json" bricht $.post lautlos ab wenn TW HTML sendet (z.B. Weiterleitung).
 window._rbSend = (sourceId, targetId, wood, stone, iron, rowId) => {
-    document.getElementById(rowId)?.remove();
+    const row = document.getElementById(rowId);
+    if (row) row.style.opacity = "0.4";
+
     $.ajax({
         url:      `/game.php?village=${sourceId}&screen=market&ajaxaction=send_res`,
         type:     'POST',
@@ -1033,22 +1044,27 @@ window._rbSend = (sourceId, targetId, wood, stone, iron, rowId) => {
             wood:           wood,
             stone:          stone,
             iron:           iron,
-            h:              csrf_token,
+            // FIX: fallback csrf — game_data.csrf for newer TW versions
+            h:              getCsrf(),
         },
     }).done((raw) => {
         try {
             const r = JSON.parse(raw);
             if (r.error) {
+                if (row) row.style.opacity = "1";
                 UI.ErrorMessage(r.error, 2500);
             } else {
+                if (row) row.remove();
                 UI.SuccessMessage(r.success || L.done, 800);
             }
         } catch {
-            // TW hat HTML geantwortet (Weiterleitung zur Markt-Seite) → Rohstoffe gesendet
+            // TW responded with HTML (redirect to market page) → resources sent
+            if (row) row.remove();
             UI.SuccessMessage(L.done, 800);
         }
     }).fail((xhr) => {
-        console.error('[RBPro] _rbSend Fehler:', xhr.status, xhr.responseText?.slice(0, 300));
+        if (row) row.style.opacity = "1";
+        console.error('[RBPro] Send error:', xhr.status, xhr.responseText?.slice(0, 300));
         UI.ErrorMessage('Fehler beim Senden (HTTP ' + xhr.status + ')', 2500);
     });
 };
@@ -1059,7 +1075,6 @@ window._rbSend = (sourceId, targetId, wood, stone, iron, rowId) => {
 function renderResults(launches, clusterStats, villages, incoming, clusters) {
     const div = document.getElementById("rbpro_results");
 
-    // Merge multi-send to same pair into one row
     const merged = new Map();
     for (const l of launches) {
         const k = l.id_origin + "_" + l.id_destination;
@@ -1068,12 +1083,10 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
         } else {
             const e = merged.get(k);
             e.wood += l.wood; e.stone += l.stone; e.iron += l.iron; e.total += l.total;
-            // distance stays the same (same pair, same distance)
         }
     }
     const rows = [...merged.values()].sort((a,b) => a.distance - b.distance);
 
-    // FIX: precompute post-transfer state once (O(V+R)) instead of O(V×R) per popup open
     const postState = new Map();
     villages.forEach(v => {
         const inc = incoming.get(v.coord) || {wood:0,stone:0,iron:0};
@@ -1103,18 +1116,18 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
     <div class="rbpro-section">
       <div class="rbpro-scroll">
       <table class="rbpro-table">
-        <tr><th></th><th>🪵 ${L.wood}</th><th>🪨 ${L.stone}</th><th>⚙ ${L.iron}</th></tr>
+        <tr><th></th><th>&#x1F332; ${L.wood}</th><th>&#x1F9F1; ${L.stone}</th><th>&#x2699; ${L.iron}</th></tr>
         <tr><td><b>Total</b></td><td>${fmt(totalW)}</td><td>${fmt(totalS)}</td><td>${fmt(totalI)}</td></tr>
         <tr><td><b>Avg/village</b></td><td>${fmt(totalW/n)}</td><td>${fmt(totalS/n)}</td><td>${fmt(totalI/n)}</td></tr>
-        <tr><td><b>Sends</b></td>
+        <tr><td><b>Sends (${rows.length})</b></td>
           <td>${fmt(rows.reduce((a,r)=>a+r.wood,0))}</td>
           <td>${fmt(rows.reduce((a,r)=>a+r.stone,0))}</td>
           <td>${fmt(rows.reduce((a,r)=>a+r.iron,0))}</td>
         </tr>
       </table>
       </div>
-      <button class="rbpro-btn" onclick="window._rbShowClusters()">📊 ${L.clusters}</button>
-      <button class="rbpro-btn" onclick="window._rbShowResult()">📋 ${L.results}</button>
+      <button class="rbpro-btn" onclick="window._rbShowClusters()">&#128202; ${L.clusters}</button>
+      <button class="rbpro-btn" onclick="window._rbShowResult()">&#128203; ${L.results}</button>
     </div>
     <div class="rbpro-scroll" style="max-height:460px;overflow-y:auto">
     <table class="rbpro-table" id="rbpro_sendtable">
@@ -1122,7 +1135,7 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
         <th>#</th>
         <th>${L.source}</th><th>${L.target}</th>
         <th>${L.distance}</th><th>Total</th>
-        <th>🪵</th><th>🪨</th><th>⚙</th>
+        <th>&#x1F332;</th><th>&#x1F9F1;</th><th>&#x2699;</th>
         <th></th>
       </tr>`;
 
@@ -1148,7 +1161,6 @@ function renderResults(launches, clusterStats, villages, incoming, clusters) {
 
     window._rbData = { rows, clusterStats, villages, incoming, clusters, postState };
 
-    // FIX: addEventListener instead of window.onkeydown (no more game handler override)
     if (window._rbKeyHandler) window.removeEventListener("keydown", window._rbKeyHandler);
     window._rbKeyHandler = e => {
         if (e.key === "Enter") {
@@ -1177,9 +1189,9 @@ window._rbShowClusters = () => {
 
 window._rbShowResult = () => {
     if (!window._rbData) return;
-    const { villages, postState } = window._rbData;  // FIX: use precomputed postState
+    const { villages, postState } = window._rbData;
     let h = `<div style="max-height:600px;overflow-y:auto"><table class="rbpro-table">
-      <tr><th>Village</th><th>Pts</th><th>Priority</th><th>🪵 after</th><th>🪨 after</th><th>⚙ after</th><th>WH cap</th></tr>`;
+      <tr><th>Village</th><th>Pts</th><th>Priority</th><th>&#x1F332; after</th><th>&#x1F9F1; after</th><th>&#x2699; after</th><th>WH cap</th></tr>`;
 
     villages.forEach(v => {
         const ps  = postState.get(v.id) || {w:0,s:0,fe:0};
@@ -1204,4 +1216,4 @@ window._rbShowResult = () => {
 // INIT
 // ═══════════════════════════════════════════════════════════════════════════════
 buildUI();
-UI.SuccessMessage("ResourceBalancer PRO v2 loaded — configure & click Start", 2000);
+UI.SuccessMessage("ResourceBalancer PRO v2.1 geladen — Einstellungen prüfen & Start klicken", 2500);
