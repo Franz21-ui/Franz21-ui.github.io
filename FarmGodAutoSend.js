@@ -86,9 +86,6 @@ window.FarmGod.Library = (function () {
           return arr;
         },
         addItem: function (item) {
-          // FIX #1: war reduce((next,curr)=>curr<next?curr:next, 0) was den
-          // minimalen LENGTH-Wert statt den minimalen INDEX zurückgab.
-          // Bsp.: Queues [5,3,8] → altes reduce gab 3 zurück → queues[3] = undefined!
           let lengths = twLib.queues.map((q) => q.length);
           let leastBusyQueue = lengths.indexOf(Math.min(...lengths));
           twLib.queues[leastBusyQueue].enqueue(item);
@@ -121,7 +118,6 @@ window.FarmGod.Library = (function () {
   /**** Script Library ****/
   const setUnitSpeeds = function () {
     let unitSpeeds = {};
-    // FIX: $.when($.get(...)) war überflüssig — $.get gibt direkt ein Deferred zurück
     $.get('/interface.php?func=get_unit_info')
       .then((xml) => {
         $(xml)
@@ -205,8 +201,6 @@ window.FarmGod.Library = (function () {
   const getDistance = function (origin, target) {
     let a = origin.toCoord(true);
     let b = target.toCoord(true);
-    // FIX #2 (part): toCoord gibt jetzt Zahlen zurück (siehe unten),
-    // aber Sicherheits-Fallback mit Number() bleibt trotzdem
     return Math.hypot(Number(a.x) - Number(b.x), Number(a.y) - Number(b.y));
   };
 
@@ -217,7 +211,7 @@ window.FarmGod.Library = (function () {
 
   const getCurrentServerTime = function () {
     let match = $('#serverTime').closest('p').text().match(/\d+/g);
-    if (!match || match.length < 6) return Date.now(); // Fallback
+    if (!match || match.length < 6) return Date.now();
     let [hour, min, sec, day, month, year] = match;
     return new Date(year, month - 1, day, hour, min, sec).getTime();
   };
@@ -247,7 +241,6 @@ window.FarmGod.Library = (function () {
       t = tomorrowPattern[1].split(':');
       date = new Date(d[2], d[1] - 1, d[0] + 1, t[0], t[1], t[2], t[3] || 0);
     } else if (laterDatePattern !== null) {
-      // FIX #5: war kein null-Check — laterDatePattern[1] warf TypeError wenn kein Match
       d = (laterDatePattern[1] + d[2]).split('.').map((x) => +x);
       t = laterDatePattern[2].split(':');
       date = new Date(d[2], d[1] - 1, d[0], t[0], t[1], t[2], t[3] || 0);
@@ -259,9 +252,6 @@ window.FarmGod.Library = (function () {
     return date.getTime();
   };
 
-  // FIX #2: toCoord(true) gibt jetzt numerische x/y zurück statt Strings.
-  // Vorher: { x: "500", y: "300" } → Math.hypot("500"-"300") war zufällig korrekt
-  // durch JS-Coercion, aber NaN-anfällig bei ungültigen Koordinaten.
   String.prototype.toCoord = function (objectified) {
     let c = (this.match(/\d{1,3}\|\d{1,3}/g) || [false]).pop();
     if (!c) return objectified ? { x: 0, y: 0 } : c;
@@ -373,12 +363,13 @@ window.FarmGod.Main = (function (Library, Translation) {
   let sessionStats = { sent: 0, errors: 0, runs: 0, villages: {} };
   // ── END STATE ──────────────────────────────────────────────────────────────
 
+  // ── FIX: skipUnits moved to module scope so both villagesProcessor
+  //         and farmProcessor use the same filter, keeping arrays aligned.
+  const skipUnits = ['ram', 'catapult', 'knight', 'snob', 'militia'];
+  // ── END FIX ────────────────────────────────────────────────────────────────
+
   // ── AUTO-SEND ──────────────────────────────────────────────────────────────
   const autoSend = function (onSuccess, onError, onComplete) {
-    // FIX #7: Button wird bei jedem autoSend-Aufruf neu erstellt damit der
-    // click-Handler immer auf die aktuelle sendNext-Closure zeigt.
-    // Vorher: Button wurde nur einmal erstellt → Restart-Zyklen nutzten die
-    // alte sendNext-Funktion (stale closure).
     $('#farmGodControls').remove();
     $('#am_widget_Farm').first().before(
       '<div id="farmGodControls" style="margin:5px 0;text-align:center;">' +
@@ -408,7 +399,6 @@ window.FarmGod.Main = (function (Library, Translation) {
       setTimeout(sendNext, getDelay());
     };
 
-    // Bind pause button to the freshly created sendNext
     $('#farmGodPauseBtn').on('click', function () {
       autoPaused = !autoPaused;
       $(this).val(autoPaused ? 'Weiter' : 'Pause');
@@ -441,6 +431,8 @@ window.FarmGod.Main = (function (Library, Translation) {
     $(statsHtml).addClass('farmGodStats').insertBefore('.farmGodContent');
 
     clearInterval(countdownTimer);
+    // FIX countdown: anchor to Date.now() so the displayed seconds stay
+    // in sync with the actual setTimeout delay passed from runFarmCycle.
     let restartEnd = Date.now() + restartInSec * 1000;
     countdownTimer = setInterval(function () {
       let remaining = Math.round((restartEnd - Date.now()) / 1000);
@@ -450,19 +442,19 @@ window.FarmGod.Main = (function (Library, Translation) {
       } else {
         $('#farmGodCountdown').text('Neustart in ' + remaining + 's');
       }
-    }, 1000);
+    }, 500); // poll at 500 ms so the display never lags more than half a second
   };
   // ── END STATS ──────────────────────────────────────────────────────────────
 
   // ── AUTO-RESTART ───────────────────────────────────────────────────────────
-  const scheduleRestart = function (minMin, minMax, runOptions) {
-    let delayMin =
-      Math.floor(Math.random() * (minMax - minMin + 1) + minMin) * 60 * 1000;
+  // FIX countdown: accepts delayMs directly instead of re-rolling Math.random(),
+  // so the actual restart fires at exactly the time shown in the countdown.
+  const scheduleRestart = function (delayMs, runOptions) {
     autoRestartTimer = setTimeout(function () {
       $('.farmGodStats').remove();
       $('.farmGodContent').remove();
       runFarmCycle(runOptions);
-    }, delayMin);
+    }, delayMs);
   };
   // ── END AUTO-RESTART ───────────────────────────────────────────────────────
 
@@ -478,9 +470,6 @@ window.FarmGod.Main = (function (Library, Translation) {
       UI.updateProgressBar($('#FarmGodProgessbar'), 0, plan.counter);
       $('#FarmGodProgessbar').data('current', 0).data('max', plan.counter);
 
-      // FIX #8: _farmGodOnSuccess/_farmGodOnError waren window-Globals und
-      // konnten zwischen Zyklen überschrieben werden / mit anderen Skripten kollidieren.
-      // Jetzt werden lokale Zähler per Closure übergeben.
       let runSent = 0;
       let runErrors = 0;
 
@@ -498,10 +487,13 @@ window.FarmGod.Main = (function (Library, Translation) {
         sessionStats.errors++;
       };
 
-      // Pass callbacks directly into sendFarm via re-binding event handlers
       bindSendCallbacks(onFarmSuccess, onFarmError);
 
       autoSend(onFarmSuccess, onFarmError, function () {
+        // FIX countdown: compute the delay ONCE and pass the same value to
+        // both showStats (display) and scheduleRestart (actual timer).
+        // Previously each function called Math.random() independently,
+        // so the countdown showed a different duration than the real delay.
         let restartSec = Math.floor(
           Math.random() * (opts.restartMax - opts.restartMin + 1) + opts.restartMin
         ) * 60;
@@ -509,7 +501,7 @@ window.FarmGod.Main = (function (Library, Translation) {
         showStats(runSent, runErrors, restartSec);
 
         if (opts.restartMin > 0) {
-          scheduleRestart(opts.restartMin, opts.restartMax, opts);
+          scheduleRestart(restartSec * 1000, opts);
         }
       });
     });
@@ -564,7 +556,6 @@ window.FarmGod.Main = (function (Library, Translation) {
     }
   };
 
-  // Speichert die aktuellen Send-Callbacks in einem Closure-erreichbaren Scope
   let _onFarmSuccess = null;
   let _onFarmError = null;
 
@@ -612,7 +603,6 @@ window.FarmGod.Main = (function (Library, Translation) {
       restartMin: 30,
       restartMax: 45,
     };
-    // Backwards compat with old key names
     if (options.optionGroup !== undefined) {
       options.group    = options.optionGroup;
       options.distance = options.optionDistance;
@@ -684,8 +674,6 @@ window.FarmGod.Main = (function (Library, Translation) {
   };
 
   const buildTable = function (plan) {
-    // FIX #3: War <tr><div>...</div></tr> — <div> darf nicht direkt in <tr>.
-    // Jetzt: <tr><td colspan="4"><div>...</div></td></tr>
     let html =
       `<div class="vis farmGodContent"><h4>FarmGod</h4><table class="vis" width="100%">` +
       `<tr><td colspan="4">` +
@@ -700,7 +688,6 @@ window.FarmGod.Main = (function (Library, Translation) {
       `</tr>`;
 
     if (!$.isEmptyObject(plan)) {
-      // FIX: for...in durch Object.keys().forEach() ersetzt (sicherer bei vererbten Props)
       Object.keys(plan).forEach((prop, idx) => {
         if (game_data.market == 'nl') {
           html +=
@@ -736,11 +723,9 @@ window.FarmGod.Main = (function (Library, Translation) {
     };
 
     let villagesProcessor = ($html) => {
-      let skipUnits = ['ram', 'catapult', 'knight', 'snob', 'militia'];
       const mobileCheck = $('#mobileHeader').length > 0;
 
       if (mobileCheck) {
-        // FIX: war jQuery($html) — $html ist bereits ein jQuery-Objekt, kein double-wrap nötig
         $html.find('.overview-container > div').each((i, el) => {
           try {
             const $el = $(el);
@@ -766,6 +751,8 @@ window.FarmGod.Main = (function (Library, Translation) {
               }
             });
 
+            // FIX troops: use module-level skipUnits so the filter matches
+            // the one applied to templateUnits in farmProcessor.
             const filteredUnits = units.filter(
               (_, index) => skipUnits.indexOf(game_data.units[index]) === -1
             );
@@ -783,6 +770,7 @@ window.FarmGod.Main = (function (Library, Translation) {
           .each((i, el) => {
             let $el = $(el);
             let $qel = $el.find('.quickedit-label').first();
+            // FIX troops: use module-level skipUnits (same reason as above).
             let units = $el
               .find('.unit-item')
               .filter((index) => skipUnits.indexOf(game_data.units[index]) === -1)
@@ -834,16 +822,20 @@ window.FarmGod.Main = (function (Library, Translation) {
               .attr('class')
               .match(/farm_icon_(.*)\s/)[1];
 
-            let templateUnits = $el
-              .find('input[type="text"], input[type="number"]')
+            // FIX troops: filter out skipUnits from templateUnits so its
+            // length and order match data.villages[x].units exactly.
+            // Previously templateUnits included all unit types (including
+            // ram/catapult/knight/snob/militia) while villageUnits did not,
+            // causing subtractArrays to compare wrong indices and never
+            // consume troops correctly — leaving units "left over" every run.
+            let $inputs = $el.find('input[type="text"], input[type="number"]');
+            let templateUnits = $inputs
+              .filter((index) => skipUnits.indexOf(game_data.units[index]) === -1)
               .map((index, element) => $(element).val().toNumber())
               .get();
 
-            // FIX #6: unitSpeeds[key] konnte undefined zurückgeben → Math.max gab NaN.
-            // Jetzt: || 0 als Fallback damit ungültige Einheitennamen 0 beitragen.
             let templateSpeed = Math.max(
-              ...$el
-                .find('input[type="text"], input[type="number"]')
+              ...$inputs
                 .map((index, element) => {
                   let val = $(element).val().toNumber();
                   if (val <= 0) return 0;
@@ -900,8 +892,6 @@ window.FarmGod.Main = (function (Library, Translation) {
             let [id, name, x, y, player_id] = villageData.split(',');
             let coord = `${x}|${y}`;
 
-            // FIX #4: player_id kommt als String aus split() — parseInt nötig für
-            // zuverlässigen Vergleich. War: player_id == 0 (loose equality, fehleranfällig)
             if (parseInt(player_id) === 0 && !data.farms.farms.hasOwnProperty(coord)) {
               data.farms.farms[coord] = { id: id.toNumber() };
             }
@@ -948,14 +938,12 @@ window.FarmGod.Main = (function (Library, Translation) {
     let serverTime = Math.round(lib.getCurrentServerTime() / 1000);
 
     for (let prop in data.villages) {
-      // OPT: Distanzen einmal berechnen und sortieren (war: getDistance zweimal pro Farm)
       let orderedFarms = Object.keys(data.farms.farms)
         .map((key) => ({ coord: key, dis: lib.getDistance(prop, key) }))
         .sort((a, b) => a.dis - b.dis);
 
       orderedFarms.forEach((el) => {
-        // FIX: distance <= optionDistance (inklusiv) statt < (exklusiv)
-        if (el.dis > optionDistance) return; // früher abbrechen spart unnötige Arbeit
+        if (el.dis > optionDistance) return;
 
         let farmIndex = data.farms.farms[el.coord];
         let template_name =
@@ -963,12 +951,11 @@ window.FarmGod.Main = (function (Library, Translation) {
             ? 'b'
             : 'a';
         let template = data.farms.templates[template_name];
-        if (!template) return; // Template nicht vorhanden — überspringen
+        if (!template) return;
 
         let unitsLeft = lib.subtractArrays(data.villages[prop].units, template.units);
         if (!unitsLeft) return;
 
-        // OPT: el.dis bereits berechnet — kein zweiter getDistance-Aufruf nötig
         let distance = el.dis;
         let arrival = Math.round(
           serverTime + distance * template.speed * 60 + Math.round(plan.counter / 5)
@@ -1020,7 +1007,6 @@ window.FarmGod.Main = (function (Library, Translation) {
       farmBusy = true;
       Accountmanager.farm.last_click = n;
 
-      // OPT: $pb einmal cachen statt mehrfach abfragen
       let $pb = $('#FarmGodProgessbar');
 
       TribalWars.post(
@@ -1039,7 +1025,6 @@ window.FarmGod.Main = (function (Library, Translation) {
           $pb.data('current', $pb.data('current') + 1);
           UI.updateProgressBar($pb, $pb.data('current'), $pb.data('max'));
 
-          // FIX #8: kein globales window._farmGodOnSuccess mehr — Callback per Closure
           let villageName = $this.closest('.farmRow').find('td').first().text().trim();
           _onFarmSuccess && _onFarmSuccess(villageName);
 
@@ -1051,7 +1036,6 @@ window.FarmGod.Main = (function (Library, Translation) {
           $pb.data('current', $pb.data('current') + 1);
           UI.updateProgressBar($pb, $pb.data('current'), $pb.data('max'));
 
-          // FIX #8: kein globales window._farmGodOnError mehr
           _onFarmError && _onFarmError();
 
           $this.closest('.farmRow').remove();
