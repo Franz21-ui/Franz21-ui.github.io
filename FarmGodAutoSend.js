@@ -4,7 +4,13 @@
  * 1) Barbaren-Metadaten aus /map/village.txt lesen
  * 2) neue Barbaren als Kandidaten für Farmplanung bereitstellen
  * 3) manuellen Katapult-Coach anzeigen
-*/
+ *
+ * WICHTIG:
+ * - Dieses Modul umgeht keine Captchas, Botprüfungen oder Schutzmechanismen.
+ * - Dieses Modul sendet keine Katapultangriffe automatisch.
+ * - Der Katapult-Coach erstellt nur Vorschläge und öffnet optional die Sammelplatz-Seite.
+ * - Das finale Absenden bleibt bewusst manuell.
+ */
 
 (function () {
   'use strict';
@@ -265,166 +271,4 @@
         'Kata <input type="text" size="3" class="fgUnit" data-unit="catapult" value="' + escapeHtml(opts.unitPreset.catapult || 1) + '">' +
         '</td></tr>' +
         '</table><br>' +
-        '<input type="button" class="btn fgImportBarbs" value="Barbaren-Metadaten aktualisieren"> ' +
-        '<input type="button" class="btn fgBuildCatPlan" value="Manuellen Katapult-Plan erstellen">' +
-        '</div>'
-      );
-    };
-
-    const readCatapultCoachOptions = function () {
-      const unitPreset = {};
-      $('.fgUnit').each(function () {
-        unitPreset[$(this).data('unit')] = parseInt($(this).val(), 10) || 0;
-      });
-
-      const opts = {
-        originId: String($('.fgCatOriginId').val() || '').trim(),
-        originCoord: String($('.fgCatOriginCoord').val() || '').trim(),
-        maxDistance: parseFloat($('.fgCatMaxDistance').val()) || DEFAULT_CATAPULT.maxDistance,
-        limit: parseInt($('.fgCatLimit').val(), 10) || DEFAULT_CATAPULT.limit,
-        targetBuilding: $('.fgCatBuilding').val() || DEFAULT_CATAPULT.targetBuilding,
-        unitPreset: unitPreset,
-      };
-
-      setJson(STORAGE.catapultCoachOptions, opts);
-      return opts;
-    };
-
-    const rallyPointUrl = function (originId, targetId) {
-      const base = (window.game_data && game_data.link_base_pure)
-        ? game_data.link_base_pure
-        : '/game.php?';
-      return base + 'place&village=' + encodeURIComponent(originId) + '&target=' + encodeURIComponent(targetId);
-    };
-
-    const buildCatapultPlan = function () {
-      const opts = readCatapultCoachOptions();
-      const barbs = getStoredBarbarianMetadata();
-
-      if (!opts.originId || !opts.originCoord.match(/^\d{1,3}\|\d{1,3}$/)) {
-        UI.ErrorMessage('Bitte Ausgangsdorf ID und Koordinate im Format 500|500 angeben.');
-        return;
-      }
-
-      const rows = Object.keys(barbs)
-        .map(function (coord) {
-          return Object.assign({}, barbs[coord], {
-            distance: distance(opts.originCoord, coord),
-          });
-        })
-        .filter(function (v) {
-          return v.distance <= opts.maxDistance;
-        })
-        .sort(function (a, b) {
-          return a.distance - b.distance;
-        })
-        .slice(0, opts.limit);
-
-      $('#farmGodCatapultPlan').remove();
-
-      let html =
-        '<div id="farmGodCatapultPlan" class="vis" style="margin:8px auto;width:98%;padding:8px;">' +
-        '<h4>Manueller Katapult-Plan</h4>' +
-        '<p style="font-size:11px;line-height:15px;">Keine Auto-Angriffe: Nutze die Links, prüfe jede Eingabe manuell und sende nur bewusst selbst.</p>' +
-        '<table class="vis" style="width:100%;font-size:11px;">' +
-        '<tr>' +
-        '<th>Ziel</th>' +
-        '<th>Entfernung</th>' +
-        '<th>Einheiten-Vorgabe</th>' +
-        '<th>Zielgebäude</th>' +
-        '<th>Manuell öffnen</th>' +
-        '</tr>';
-
-      if (rows.length === 0) {
-        html += '<tr><td colspan="5" style="text-align:center;">Keine Barbaren im angegebenen Umkreis gefunden.</td></tr>';
-      }
-
-      rows.forEach(function (v, i) {
-        const unitsText = Object.keys(opts.unitPreset)
-          .filter(function (unit) { return opts.unitPreset[unit] > 0; })
-          .map(function (unit) { return unit + ': ' + opts.unitPreset[unit]; })
-          .join(', ');
-
-        html +=
-          '<tr class="row_' + (i % 2 === 0 ? 'a' : 'b') + '">' +
-          '<td>' + escapeHtml(v.name) + ' (' + escapeHtml(v.coord) + ')</td>' +
-          '<td style="text-align:center;">' + v.distance.toFixed(2) + '</td>' +
-          '<td>' + escapeHtml(unitsText || 'Keine Einheiten gesetzt') + '</td>' +
-          '<td style="text-align:center;">' + escapeHtml(opts.targetBuilding) + '</td>' +
-          '<td style="text-align:center;"><a class="btn" href="' + rallyPointUrl(opts.originId, v.id) + '">Sammelplatz öffnen</a></td>' +
-          '</tr>';
-      });
-
-      html += '</table></div>';
-      $('#farmGodCatapultOptions').after(html);
-    };
-
-    const renderPanel = function () {
-      $('#farmGodSafeExtensionPanel').remove();
-
-      const html =
-        '<div id="farmGodSafeExtensionPanel" style="margin:8px auto;width:98%;">' +
-        buildCatapultCoachOptions() +
-        '</div>';
-
-      const $target = $('#am_widget_Farm').first();
-      if ($target.length) {
-        $target.before(html);
-      } else {
-        $('#content_value, #contentContainer, body').first().prepend(html);
-      }
-
-      $('.fgImportBarbs')
-        .off('click')
-        .on('click', function () {
-          const $btn = $(this);
-          $btn.prop('disabled', true).val('Lade...');
-          fetchBarbarianMetadata()
-            .then(function (barbs) {
-              UI.SuccessMessage(Object.keys(barbs).length + ' Barbarendörfer importiert.');
-            })
-            .fail(function () {
-              UI.ErrorMessage('Barbaren-Metadaten konnten nicht geladen werden.');
-            })
-            .always(function () {
-              $btn.prop('disabled', false).val('Barbaren-Metadaten aktualisieren');
-            });
-        });
-
-      $('.fgBuildCatPlan')
-        .off('click')
-        .on('click', buildCatapultPlan);
-    };
-
-    const init = function () {
-      if (hasSafetyChallenge()) {
-        pauseForSafety('Sicherheitsprüfung auf der Seite erkannt');
-        return;
-      }
-
-      renderPanel();
-    };
-
-    return {
-      init: init,
-      fetchBarbarianMetadata: fetchBarbarianMetadata,
-      getStoredBarbarianMetadata: getStoredBarbarianMetadata,
-      mergeNewBarbariansIntoFarmData: mergeNewBarbariansIntoFarmData,
-      safety: {
-        hasSafetyChallenge: hasSafetyChallenge,
-        pauseForSafety: pauseForSafety,
-        canSendByRateLimit: canSendByRateLimit,
-        registerSendSuccess: registerSendSuccess,
-        registerSendError: registerSendError,
-        getSafeDelay: getSafeDelay,
-        isPaused: function () { return safetyPaused; },
-      },
-    };
-  })();
-
-  $(function () {
-    if (window.game_data && game_data.screen === 'am_farm') {
-      window.FarmGod.SafeExtension.init();
-    }
-  });
-})();
+        '<input type="button" class="btn fgImportBarbs" value="Bar
