@@ -4,7 +4,7 @@
  * 1) Barbaren-Metadaten aus /map/village.txt lesen
  * 2) neue Barbaren als Kandidaten für Farmplanung bereitstellen
  * 3) manuellen Katapult-Coach anzeigen
- */
+*/
 
 (function () {
   'use strict';
