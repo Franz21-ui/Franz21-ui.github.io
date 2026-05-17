@@ -4,12 +4,6 @@
  * 1) Barbaren-Metadaten aus /map/village.txt lesen
  * 2) neue Barbaren als Kandidaten für Farmplanung bereitstellen
  * 3) manuellen Katapult-Coach anzeigen
- *
- * WICHTIG:
- * - Dieses Modul umgeht keine Captchas, Botprüfungen oder Schutzmechanismen.
- * - Dieses Modul sendet keine Katapultangriffe automatisch.
- * - Der Katapult-Coach erstellt nur Vorschläge und öffnet optional die Sammelplatz-Seite.
- * - Das finale Absenden bleibt bewusst manuell.
  */
 
 (function () {
