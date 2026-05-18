@@ -1,5 +1,6 @@
 // TW Operation Scheduler v4 — Beast Edition
 // Angriff + Unterstützung | Pre-Warm Timing | Adels-Züge | Bulk-Edit | Presets | Timeline | Sound
+// Import: DS-Ultimate JSON + DS Workbench Tab-Export
 
 (() => {
   'use strict';
@@ -12,10 +13,10 @@
 
   // ── KONFIGURATION ──────────────────────────────────────────────────────────
   const CFG = {
-    PAGE_SIZE:   50,    // Ops pro Seite
-    PREWARM_MS: 5000,   // ms VOR Abfahrt: Place+Confirm-Screen laden
-    FIRE_OFFSET: 200,   // ms VOR Abfahrt: finalen POST senden (Latenz-Kompens.)
-    ALERT_SEC:    60,   // Sek. VOR erster Op: Sound-Alarm auslösen
+    PAGE_SIZE:   50,
+    PREWARM_MS: 5000,
+    FIRE_OFFSET: 200,
+    ALERT_SEC:    60,
   };
 
   // ── EINHEITEN ──────────────────────────────────────────────────────────────
@@ -45,6 +46,11 @@
     'snob':'snob','knight':'knight','spy':'spy',
   };
 
+  // DS-Ultimate slowest_unit Index → Einheiten-Key + Grundgeschwindigkeit (min/Feld)
+  // Index: 1=Speer 2=Schwert 3=Axt 4=Aufkl 5=LKav 6=SKav 7=Ramme 8=Kata 9=Adel 10=Paladin
+  const UNIT_IDX       = ['','spear','sword','axe','spy','light','heavy','ram','catapult','snob','knight'];
+  const UNIT_SPEED_MIN = { spear:18, sword:22, axe:18, spy:9, light:10, heavy:11, ram:30, catapult:30, snob:35, knight:10 };
+
   const BUILDINGS = [
     { key:'',         label:'— Standard —'   },
     { key:'main',     label:'Hauptgebäude'    },
@@ -64,7 +70,6 @@
     { key:'wall',     label:'Wall'            },
   ];
 
-  // Felder die KEIN CSRF sind
   const KNOWN_FIELDS = [
     'template_id','source_village','source','spear','sword','axe','spy',
     'light','heavy','ram','catapult','snob','knight','archer','marcher',
@@ -72,13 +77,12 @@
   ];
 
   // ── STATE ──────────────────────────────────────────────────────────────────
-  let ops       = [];
-  let ticker    = null;
-  let running   = false;
-  let srvOff    = 0;
+  let ops        = [];
+  let ticker     = null;
+  let running    = false;
+  let srvOff     = 0;
   let alertFired = false;
 
-  // Filter / Sort / Page
   let page         = 0;
   let filterSt     = 'all';
   let filterType   = 'all';
@@ -86,8 +90,7 @@
   let sortKey      = 'departTs';
   let sortDir      = 1;
 
-  // ── VILLAGE-QUEUE: verhindert parallele Sends vom selben Dorf
-  //    Wichtig für Adels-Züge (4 Adel vom selben Dorf in Reihenfolge)
+  // ── VILLAGE-QUEUE ──────────────────────────────────────────────────────────
   const vQueues = {};
   const queueSend = (vid, fn) => {
     if (!vQueues[vid]) vQueues[vid] = Promise.resolve();
@@ -143,40 +146,164 @@
 
   // ── PARSER ─────────────────────────────────────────────────────────────────
   const parseTs = str => {
+    // Unterstützt: DD.MM.YY und DD.MM.YYYY
     let m = str.match(/(\d+)\.(\d+)\.(\d+)\s+(\d+):(\d+):(\d+)/);
     if (!m) return null;
     let y = +m[3] < 100 ? 2000 + +m[3] : +m[3];
     return new Date(y, +m[2]-1, +m[1], +m[4], +m[5], +m[6]).getTime();
   };
 
-  // Erkennt aus DS-Ultimate Typ-Spalte ob Angriff oder Unterstützung
   const detectMode = typeStr => {
     let t = typeStr.toLowerCase().replace(/\s+/g, '');
     if (t.includes('unterstütz') || t.includes('unterst') || t.includes('support')
-        || t === 'u' || t === 'def' || t === 'deff') return 'support';
+        || t === 'u' || t === 's' || t === 'def' || t === 'deff') return 'support';
     return 'attack';
   };
 
-  const parseExport = raw => {
+  // ── ABFAHRTSZEIT AUS ANKUNFTSZEIT BERECHNEN ────────────────────────────────
+  // Wird für DS-Ultimate JSON gebraucht (dort nur arrival_time vorhanden)
+  const calcDepartTs = (srcId, dstId, slowestUnitIdx, arrivalSec) => {
+    let sv = window._twOpsAllV && window._twOpsAllV[srcId];
+    let dv = window._twOpsAllV && window._twOpsAllV[dstId];
+    if (!sv || !dv) return null;
+
+    let dx   = sv.x - dv.x, dy = sv.y - dv.y;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+
+    let unitKey  = UNIT_IDX[slowestUnitIdx] || 'ram';
+    let speedMin = UNIT_SPEED_MIN[unitKey]  || 30;
+
+    // Weltgeschwindigkeit + Einheitengeschwindigkeitsfaktor aus game_data
+    let worldSpeed = (typeof game_data !== 'undefined' && game_data.speed)      ? +game_data.speed      : 1;
+    let unitSpeed  = (typeof game_data !== 'undefined' && game_data.unit_speed) ? +game_data.unit_speed : 1;
+
+    // Reisezeit in ms  — TW rundet auf ganze Sekunden
+    let travelMs = Math.round((dist * speedMin * 60 * 1000) / (worldSpeed * unitSpeed));
+    return arrivalSec * 1000 - travelMs;
+  };
+
+  // ── DS-ULTIMATE JSON PARSER ────────────────────────────────────────────────
+  //
+  //  Format: { title, world, items: [{ source, destination, slowest_unit,
+  //            arrival_time, type, spy, axe, light, ram, catapult, ... }] }
+  //
+  //  Besonderheiten:
+  //  · source/destination = Dorf-ID  →  Koordinaten aus _twOpsAllV
+  //  · arrival_time = Unix-Sekunden  →  departTs via calcDepartTs()
+  //  · Truppen als Zahlen hinterlegt →  9999 = "alle verfügbaren"
+  //  · type 4 = Unterstützung, sonst = Angriff
+
+  const parseJsonExport = raw => {
+    let data;
+    try { data = JSON.parse(raw); } catch (e) { return null; }
+    if (!data || !Array.isArray(data.items) || !data.items.length) return null;
+
+    if (!window._twOpsAllV || !Object.keys(window._twOpsAllV).length) {
+      try { UI.ErrorMessage('Dorfliste noch nicht geladen — kurz warten und erneut versuchen.'); } catch (e) {}
+      return null;
+    }
+
+    let result = [];
+    data.items.forEach((item, i) => {
+      let srcId = +item.source, dstId = +item.destination;
+      let sv = window._twOpsAllV[srcId];
+      let dv = window._twOpsAllV[dstId];
+
+      if (!sv) {
+        console.warn('[TW-Ops] Quelldorf-ID nicht gefunden:', srcId);
+        return;
+      }
+
+      let originCoord   = '(' + sv.x + '|' + sv.y + ')';
+      let targetCoord   = dv ? '(' + dv.x + '|' + dv.y + ')' : '(?|?)';
+      let originVillage = sv.name || ('Dorf ' + srcId);
+      let targetName    = dv ? (dv.name || ('Dorf ' + dstId)) : ('Dorf ' + dstId);
+
+      let aTs = item.arrival_time * 1000;
+      let dTs = calcDepartTs(srcId, dstId, item.slowest_unit, item.arrival_time);
+      if (!dTs) {
+        console.warn('[TW-Ops] Zieldorf-ID nicht gefunden:', dstId);
+        return;
+      }
+
+      // Truppen aus JSON übernehmen — 9999 = alle verfügbaren
+      let troops = {};
+      UNITS.forEach(u => {
+        let v = item[u.key];
+        if (!v || v === '0' || v === 0) return;
+        troops[u.key] = (+v >= 9000) ? 'all' : String(v);
+      });
+
+      // type: Bit 2 (4) = Unterstützung in TW
+      let mode = (item.type === 4) ? 'support' : 'attack';
+
+      result.push({
+        id: i, mode,
+        type: 'real',
+        originVillage, originCoord,
+        targetName, targetCoord,
+        unitRaw: UNIT_IDX[item.slowest_unit] || '',
+        troops,
+        departTs: Math.round(dTs), arriveTs: aTs,
+        building: '', status: 'pending', statusText: 'Ausstehend',
+        timerId: null, _prewarmId: null, nobleGroup: null,
+        _srcId: srcId,  // Village-ID direkt für getOriginId
+      });
+    });
+
+    result.sort((a, b) => a.departTs - b.departTs);
+    detectNobleTrains(result);
+    return result;
+  };
+
+  // ── DS WORKBENCH / TAB-EXPORT PARSER ─────────────────────────────────────
+  //
+  //  DS Workbench liefert zwei Formate:
+  //  MIT Typ-Spalte (8 Felder):    (Fake) | Player | Origin | Unit | TargetPlayer | Target | Dep | Arr
+  //  OHNE Typ-Spalte (7 Felder):   Player | Origin | Unit | TargetPlayer | Target | Dep | Arr
+
+  const parseTabExport = raw => {
     let result = [];
     raw.trim().split('\n').forEach((line, i) => {
       line = line.trim(); if (!line) return;
       let c = line.split('\t');
-      if (c.length < 8) c = line.split(/\s{2,}/);
-      if (c.length < 8) return;
+
+      let typeRaw, oFull, uRaw, tFull, depStr, arrStr;
+
+      if (c.length >= 8) {
+        typeRaw = c[0].trim();
+        oFull   = c[2].trim();
+        uRaw    = c[3].trim();
+        tFull   = c[5].trim();
+        depStr  = c[6].trim();
+        arrStr  = c[7].trim();
+      } else if (c.length === 7) {
+        // Kein Typ-Präfix → echter Angriff
+        typeRaw = 'attack';
+        oFull   = c[1].trim();
+        uRaw    = c[2].trim();
+        tFull   = c[4].trim();
+        depStr  = c[5].trim();
+        arrStr  = c[6].trim();
+      } else {
+        return;
+      }
+
       try {
-        let oFull = c[2].trim(), uRaw = c[3].trim(), tFull = c[5].trim();
         let oC = (oFull.match(/\((\d+)\|(\d+)\)/) || [])[0];
         let tC = (tFull.match(/\((\d+)\|(\d+)\)/) || [])[0];
         if (!oC || !tC) return;
+
         let uKey = null;
         let ul = uRaw.toLowerCase().replace(/\s+/g, '');
         for (let k in UNIT_MAP) { if (ul.includes(k)) { uKey = UNIT_MAP[k]; break; } }
-        let dTs = parseTs(c[6].trim()), aTs = parseTs(c[7].trim());
+
+        let dTs = parseTs(depStr), aTs = parseTs(arrStr);
         if (!dTs || !aTs) return;
-        let typeRaw = c[0].trim();
-        let mode  = detectMode(typeRaw);
+
+        let mode   = detectMode(typeRaw);
         let isFake = typeRaw.toLowerCase().replace(/[\s()]/g,'').match(/^f(ake)?$/);
+
         result.push({
           id: i, mode,
           type: isFake ? 'fake' : 'real',
@@ -197,9 +324,83 @@
     return result;
   };
 
+  // ── AUTO-FORMAT-ERKENNUNG ──────────────────────────────────────────────────
+  const parseExport = raw => {
+    raw = raw.trim();
+    if (raw.startsWith('{')) {
+      let res = parseJsonExport(raw);
+      if (res !== null) return res;
+    }
+    return parseTabExport(raw);
+  };
+
+  // ── DS-ULTIMATE URL FETCH ──────────────────────────────────────────────────
+  //
+  //  URL-Format: https://ds-ultimate.de/tools/attackPlanner/{id}/edit/{token}
+  //
+  //  Versucht mehrere API-Endpunkte der Reihe nach. Schlägt alles fehl (CORS),
+  //  wird eine klare Fehlermeldung mit Copy-Tipp angezeigt.
+
+  const DS_URL_RE = /ds-ultimate\.de\/tools\/attackPlanner\/(\d+)\/(?:edit|view)\/([A-Za-z0-9_-]+)/;
+
+  const isDsUltimateUrl = str => DS_URL_RE.test(str);
+
+  const fetchDsUltimatePlan = async url => {
+    let m = url.match(DS_URL_RE);
+    if (!m) throw new Error('URL nicht erkannt');
+    let [, planId, token] = m;
+
+    // Mögliche API-Endpunkte in Prioritätsreihenfolge
+    let candidates = [
+      `https://ds-ultimate.de/api/attackPlan/${planId}?token=${token}`,
+      `https://ds-ultimate.de/api/attackPlanner/${planId}?token=${token}`,
+      `https://ds-ultimate.de/api/attackPlanner/${planId}/${token}`,
+      `https://ds-ultimate.de/tools/attackPlanner/${planId}/json/${token}`,
+      `https://ds-ultimate.de/tools/attackPlanner/${planId}/data/${token}`,
+    ];
+
+    let lastErr = '';
+    for (let endpoint of candidates) {
+      try {
+        let resp = await fetch(endpoint, {
+          mode: 'cors',
+          headers: { 'Accept': 'application/json, text/plain, */*' },
+        });
+        if (!resp.ok) { lastErr = 'HTTP ' + resp.status; continue; }
+        let text = await resp.text();
+        // Direkt JSON?
+        try {
+          let data = JSON.parse(text);
+          if (data && Array.isArray(data.items)) return data;
+        } catch (e) {}
+        // JSON in HTML-Seite eingebettet?
+        let patterns = [
+          /window\.__plan__\s*=\s*(\{[\s\S]*?\});/,
+          /var\s+attackPlan\s*=\s*(\{[\s\S]*?\});/,
+          /data-plan="([^"]+)"/,
+          /"items"\s*:\s*\[[\s\S]*?\]/,
+        ];
+        for (let re of patterns) {
+          let hit = text.match(re);
+          if (hit) {
+            try {
+              let raw2 = hit[1] ? hit[1].replace(/&quot;/g, '"') : hit[0];
+              let data = JSON.parse(raw2.startsWith('{') ? raw2 : '{' + raw2 + '}');
+              if (data && Array.isArray(data.items)) return data;
+            } catch (e) {}
+          }
+        }
+        lastErr = 'Kein items-Array in Antwort';
+      } catch (err) {
+        // TypeError = CORS oder Netzwerk
+        lastErr = err.message || 'Netzwerkfehler';
+      }
+    }
+
+    throw new Error(lastErr);
+  };
+
   // ── ADELS-ZUG ERKENNUNG ────────────────────────────────────────────────────
-  // Mehrere Adel zum selben Ziel = Adels-Zug → werden via Village-Queue
-  // sequenziell gesendet und visuell hervorgehoben.
   const detectNobleTrains = list => {
     let byTarget = {};
     list.forEach(op => {
@@ -214,18 +415,33 @@
   };
 
   // ── DÖRFER ─────────────────────────────────────────────────────────────────
+  // Baut zwei Maps:
+  //  _twOpsV     — eigene Dörfer  (für getOriginId via Koordinaten)
+  //  _twOpsAllV  — alle Dörfer    (für DS-Ultimate JSON: ID → {x, y, name})
+
   const loadVillages = () =>
     $.get('/map/village.txt').then(txt => {
       let myId = String(game_data.player.id);
-      window._twOpsV = [];
+      window._twOpsV    = [];
+      window._twOpsAllV = {};
       (txt.match(/[^\r\n]+/g) || []).forEach(l => {
         let p = l.split(',');
+        if (p.length < 4) return;
+        let id   = +p[0];
+        let name = (p[1] || '').trim();
+        let x    = +(p[2] || 0);
+        let y    = +(p[3] || 0);
+        window._twOpsAllV[id] = { x, y, name };
         if (p.length >= 5 && p[4].trim() === myId)
-          window._twOpsV.push({ id: +p[0], x: p[2].trim(), y: p[3].trim() });
+          window._twOpsV.push({ id, x: String(x), y: String(y) });
       });
-    }).fail(() => { window._twOpsV = []; });
+    }).fail(() => { window._twOpsV = []; window._twOpsAllV = {}; });
 
+  // ── HERKUNFTS-DORF-ID ──────────────────────────────────────────────────────
   const getOriginId = op => {
+    // DS-Ultimate JSON liefert die ID direkt
+    if (op._srcId) return op._srcId;
+
     let [ox, oy] = op.originCoord.replace(/[()]/g, '').split('|').map(s => s.trim());
     let cv = game_data.village;
     if (cv && String(cv.x) === ox && String(cv.y) === oy) return cv.id;
@@ -248,13 +464,12 @@
       let nc = op.nobleGroup ? ' noble-train' : '';
       r.className = (rowCls || cls) + nc;
     }
-    // Inputs in fertigen Zeilen deaktivieren
     if (['sent','error','missed'].includes(cls)) {
       $('[data-op="' + op.id + '"]').prop('disabled', true);
     }
   };
 
-  // ── SOUND ALARM (Web Audio API, kein externes Asset nötig) ─────────────────
+  // ── SOUND ALARM ────────────────────────────────────────────────────────────
   const playAlert = () => {
     try {
       let ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -270,15 +485,7 @@
     } catch (e) {}
   };
 
-  // ── SEND-MECHANIK (TW-konform, 3 Schritte) ─────────────────────────────────
-  //
-  //  Ablauf:
-  //  1. PREWARM_MS vor Abfahrt: Place-Screen (GET) + Confirm-Form (POST) laden
-  //  2. Auf FIRE_OFFSET ms vor Abfahrt warten
-  //  3. Finalen POST über Village-Queue senden
-  //     (Village-Queue = sequenziell pro Herkunfts-Dorf → Adels-Züge bleiben
-  //      in Reihenfolge, kein paralleles Überschreiben von Truppen)
-
+  // ── SEND-MECHANIK ──────────────────────────────────────────────────────────
   const scheduleOp = op => {
     let prewarmMs = Math.max(0, (op.departTs - CFG.PREWARM_MS) - now());
     op._prewarmId = setTimeout(() => prewarmAndQueue(op), prewarmMs);
@@ -301,7 +508,6 @@
       .catch(err => setStatus(op, String(err).substring(0, 35), 'error', 'error'));
   };
 
-  // Schritt 1 (GET) + Schritt 2 (POST confirm)
   const loadPlaceAndConfirm = (op, vid, tx, ty) => {
     let troopData = {};
     UNITS.forEach(u => {
@@ -312,8 +518,8 @@
 
     return $.get('/game.php?village=' + vid + '&screen=place&x=' + tx + '&y=' + ty)
       .then(html => {
-        let $h    = $(html);
-        let csrf  = $h.find('input[name="h"]').val()
+        let $h   = $(html);
+        let csrf = $h.find('input[name="h"]').val()
           || (typeof csrf_token !== 'undefined' ? csrf_token : null);
         if (!csrf) {
           $h.find('input[type="hidden"]').each(function () {
@@ -322,10 +528,8 @@
           });
         }
 
-        // attack vs support: unterschiedlicher Submit-Button-Key und -Wert
         let modeKey = op.mode === 'support' ? 'support' : 'attack';
         let modeVal = op.mode === 'support' ? 'Unterstützen' : 'Angreifen';
-
         let s1 = { x: tx, y: ty, target_type: 'coord', source_village: String(vid), [modeKey]: modeVal };
         if (csrf) s1.h = csrf;
 
@@ -335,21 +539,19 @@
           let $el = $h.find('input[name="' + u.key + '"]'); if (!$el.length) return;
           let avail = parseInt($el.attr('data-all-count') || $el.attr('max') || $el.val() || '0');
           let count;
-          if (val === 'all')        count = avail;
-          else if (+val < 0)        count = Math.max(0, avail + +val);
-          else                      count = Math.min(+val || 0, avail);
+          if (val === 'all')   count = avail;
+          else if (+val < 0)   count = Math.max(0, avail + +val);
+          else                 count = Math.min(+val || 0, avail);
           if (count > 0) { s1[u.key] = String(count); hasUnits = true; }
         });
         if (!hasUnits) return Promise.reject('Keine Truppen verfügbar');
 
-        // Schritt 2: Bestätigungs-Screen laden
         return $.post('/game.php?village=' + vid + '&screen=place&try=confirm', s1)
           .then(cHtml => {
             let $c  = $(cHtml);
             let err = $c.find('.error_box, .system_wide_message').text().trim();
             if (err) return Promise.reject(err.substring(0, 50));
 
-            // Confirm-Form finden (Name, ch-Feld, attack/support-Button)
             let $f = $c.find('form[name="confirm_form"]');
             if (!$f.length) {
               $f = $c.find('form').filter(function () {
@@ -357,13 +559,12 @@
                     || $(this).find('input[name="attack"], input[name="support"]').length > 0;
               }).first();
             }
-            if (!$f.length) return Promise.reject('Kein Confirm-Form gefunden');
+            if (!$f.length) return Promise.reject('Kein Confirm-Form');
 
             let fa = $f.attr('action') || '';
             let formAction = fa.startsWith('/') ? fa
               : (!fa ? '/game.php?village=' + vid + '&screen=place' : '/' + fa);
 
-            // Alle Formular-Felder einsammeln
             let s2 = {};
             $f.find('input, select, textarea').each(function () {
               let $e = $(this), n = $e.attr('name');
@@ -373,7 +574,6 @@
               s2[n] = $e.val() || '';
             });
 
-            // Korrekten Submit setzen — attack ODER support, nicht beides
             if (op.mode === 'support') {
               if (!s2.support) s2.support = 'Unterstützen';
               delete s2.attack;
@@ -382,15 +582,12 @@
               delete s2.support;
             }
 
-            // Kata-Zielgebäude anhängen falls gesetzt
             if (op.building) s2.building = op.building;
-
             return { formAction, s2 };
           });
       });
   };
 
-  // Schritt 3: finaler POST
   const fireOp = (op, formAction, s2, done) => {
     if (op.status !== 'pending') { done(); return; }
     $.post(formAction, s2)
@@ -416,7 +613,6 @@
     let t = now();
     list.forEach(op => {
       if (op.status !== 'pending') return;
-      // Zu weit in der Vergangenheit → verpasst
       if (op.departTs < t - (CFG.PREWARM_MS + 5000)) {
         op.status = 'missed'; op.statusText = 'Verpasst'; return;
       }
@@ -448,13 +644,11 @@
     ticker = setInterval(() => {
       let t = now(), allDone = true;
 
-      // Sound-Alarm prüfen
       if (!alertFired && running) {
         let next = list.filter(o => o.status === 'pending')
           .sort((a, b) => a.departTs - b.departTs)[0];
         if (next && (next.departTs - t) / 1000 <= CFG.ALERT_SEC) {
-          alertFired = true;
-          playAlert();
+          alertFired = true; playAlert();
         }
       }
 
@@ -473,9 +667,8 @@
           cd.textContent = (hh ? hh + 'h ' : '')
             + (mm || hh ? String(mm).padStart(2, '0') + 'm ' : '')
             + String(ss).padStart(2, '0') + 's';
-          if (diff <= 10 && row && !row.className.includes('imminent')) {
+          if (diff <= 10 && row && !row.className.includes('imminent'))
             row.className = 'imminent' + (op.nobleGroup ? ' noble-train' : '');
-          }
         } else if (diff > -30) {
           cd.textContent = '⚡ Sendet…';
         }
@@ -545,10 +738,7 @@
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
 
-  const sortArrow = key => {
-    if (sortKey !== key) return '';
-    return sortDir === 1 ? ' ▲' : ' ▼';
-  };
+  const sortArrow = key => sortKey !== key ? '' : (sortDir === 1 ? ' ▲' : ' ▼');
 
   const buildTable = (slice, total) => {
     let totalPages = Math.ceil(total / CFG.PAGE_SIZE);
@@ -566,8 +756,7 @@
       return pagination + '<p style="text-align:center;color:#c00;padding:10px">Keine Operationen gefunden.</p>';
 
     let h = pagination
-      + '<table class="ops-t">'
-      + '<tr>'
+      + '<table class="ops-t"><tr>'
       + '<th><input type="checkbox" id="twOChkAll" title="Alle auf Seite wählen"></th>'
       + '<th>#</th>'
       + '<th class="ops-sortable" data-sort="mode">Typ' + sortArrow('mode') + '</th>'
@@ -576,9 +765,7 @@
       + '<th>Truppen &amp; Kata-Ziel</th>'
       + '<th class="ops-sortable" data-sort="departTs">Abfahrt' + sortArrow('departTs') + '</th>'
       + '<th class="ops-sortable" data-sort="arriveTs">Ankunft' + sortArrow('arriveTs') + '</th>'
-      + '<th>Countdown</th>'
-      + '<th>Status</th>'
-      + '<th>–</th>'
+      + '<th>Countdown</th><th>Status</th><th>–</th>'
       + '</tr>';
 
     slice.forEach(op => {
@@ -617,14 +804,18 @@
           : (op.status === 'error'
             ? '<button class="ops-retry" data-retry="' + op.id + '" title="Erneut">↺</button>'
             : ''))
-        + '</td>'
-        + '</tr>';
+        + '</td></tr>';
     });
 
     return h + '</table>' + pagination;
   };
 
   // ── TIMELINE ───────────────────────────────────────────────────────────────
+  const fmtSec = sec => {
+    let hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = sec % 60;
+    return (hh ? hh + 'h ' : '') + (mm || hh ? String(mm).padStart(2,'0') + 'm ' : '') + String(ss).padStart(2,'0') + 's';
+  };
+
   const buildTimeline = list => {
     let pending = list.filter(o => o.status === 'pending').sort((a, b) => a.departTs - b.departTs);
     if (!pending.length) return '';
@@ -648,11 +839,6 @@
       + '<br>'
       + wins.map((_, i) => '<b>' + wCounts[i] + '</b> in ' + wLabels[i]).join(' &nbsp;|&nbsp; ')
       + '</div>';
-  };
-
-  const fmtSec = sec => {
-    let hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = sec % 60;
-    return (hh ? hh + 'h ' : '') + (mm || hh ? String(mm).padStart(2,'0') + 'm ' : '') + String(ss).padStart(2,'0') + 's';
   };
 
   const refreshTimeline = list => {
@@ -807,8 +993,7 @@
       white-space:nowrap;cursor:default;font-size:11px}
     #twOB table.ops-t th.ops-sortable{cursor:pointer}
     #twOB table.ops-t th.ops-sortable:hover{background:#9a6322}
-    #twOB table.ops-t td{padding:2px 4px;border-bottom:1px solid #ccc;
-      text-align:center;vertical-align:middle}
+    #twOB table.ops-t td{padding:2px 4px;border-bottom:1px solid #ccc;text-align:center;vertical-align:middle}
     #twOB tr.pending  td{background:#f4eed4}
     #twOB tr.sent     td{background:#d4edda}
     #twOB tr.error    td{background:#f8d7da}
@@ -820,17 +1005,13 @@
     .ops-status-error{color:#721c24;font-weight:bold}
     .ops-status-missed{color:#856404;font-weight:bold}
     .ops-status-pending{color:#555}
-    .oti{width:30px;text-align:center;font-size:10px;padding:1px;
-      border:1px solid #ccc;border-radius:2px}
+    .oti{width:30px;text-align:center;font-size:10px;padding:1px;border:1px solid #ccc;border-radius:2px}
     .oti:disabled{background:#eee;color:#bbb;border-color:#ddd}
-    .oab{font-size:9px;padding:1px 2px;cursor:pointer;border:1px solid #aaa;
-      border-radius:2px;background:#f4eed4}
+    .oab{font-size:9px;padding:1px 2px;cursor:pointer;border:1px solid #aaa;border-radius:2px;background:#f4eed4}
     .oab:disabled{color:#bbb;cursor:not-allowed}
-    .oks{font-size:10px;padding:1px;border-radius:2px;border:1px solid #aaa;
-      background:#fff;cursor:pointer;max-width:125px}
+    .oks{font-size:10px;padding:1px;border-radius:2px;border:1px solid #aaa;background:#fff;cursor:pointer;max-width:125px}
     .oks:disabled{background:#eee;color:#bbb}
-    #twOSumm{margin-top:4px;padding:4px 8px;background:#f4eed4;
-      border:1px solid #7D510F;border-radius:3px}
+    #twOSumm{margin-top:4px;padding:4px 8px;background:#f4eed4;border:1px solid #7D510F;border-radius:3px}
     .otc{display:flex;flex-wrap:wrap;gap:1px;justify-content:center}
     .ote{display:flex;flex-direction:column;align-items:center;font-size:9px}
     .ote label{color:#555;margin-bottom:1px}
@@ -841,19 +1022,17 @@
     .ops-retry{color:#155724;border-color:#28a745}
     .ops-retry:hover{background:#d4edda}
     .ops-pages{margin:3px 0;font-size:11px;text-align:center}
-    .ops-pnav{padding:2px 8px;cursor:pointer;border:1px solid #7D510F;
-      border-radius:3px;background:#f4eed4;font-size:11px}
+    .ops-pnav{padding:2px 8px;cursor:pointer;border:1px solid #7D510F;border-radius:3px;background:#f4eed4;font-size:11px}
     .ops-pnav:disabled{opacity:.4;cursor:not-allowed}
     .badge-atk{color:#c00;font-weight:bold}
     .badge-fake{color:#888;font-weight:bold;font-size:10px}
     .badge-noble{font-size:10px}
     .ops-filter-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;
       margin:3px 0;padding:4px 6px;background:#eee;border-radius:3px;font-size:10px}
-    .ops-filter-bar select,.ops-filter-bar input[type="text"]{font-size:10px;
-      padding:2px 4px;border:1px solid #ccc;border-radius:2px}
+    .ops-filter-bar select,.ops-filter-bar input[type="text"]{font-size:10px;padding:2px 4px;border:1px solid #ccc;border-radius:2px}
     #twOImportWrap{margin-bottom:3px}
-    #twOImportToggle{font-size:10px;color:#7D510F;cursor:pointer;
-      text-decoration:underline;display:inline-block;margin-top:1px}
+    #twOImportToggle{font-size:10px;color:#7D510F;cursor:pointer;text-decoration:underline;display:inline-block;margin-top:1px}
+    .ops-hint{font-size:9px;color:#888;margin:2px 0 0}
   </style>`;
 
   // ── DIALOG ─────────────────────────────────────────────────────────────────
@@ -873,14 +1052,15 @@
       + '<span style="font-size:9px;color:#888;margin-left:auto">Strg+Shift+O zum Öffnen</span>'
       + '</h3>'
 
-      // Import
       + '<div id="twOImportWrap"' + (hasPlan ? ' style="display:none"' : '') + '>'
-      + '<textarea id="twOTxt" placeholder="DS-Ultimate Export einfügen — '
-      + 'Angriffe UND Unterstützungen werden automatisch erkannt..."></textarea>'
+      + '<textarea id="twOTxt" placeholder="Einfügen — drei Formate werden erkannt:\n'
+      + '• DS-Ultimate Link   →  https://ds-ultimate.de/tools/attackPlanner/…/edit/…\n'
+      + '• DS-Ultimate JSON   →  { &quot;title&quot;: ..., &quot;items&quot;: [...] }\n'
+      + '• DS Workbench Tab   →  (Fake)  Dorf  Einheit  Ziel  Abfahrt  Ankunft"></textarea>'
+      + '<p class="ops-hint">Link: Plan wird automatisch von DS-Ultimate geladen (erfordert Internetzugriff vom Spielfenster). JSON/Tab: direkt parsen.</p>'
       + '</div>'
       + (hasPlan ? '<a id="twOImportToggle">▼ Neuen Export laden</a>' : '')
 
-      // Toolbar
       + '<div class="ops-tb">'
       + (!hasPlan
         ? '<input type="button" id="twOBtnLoad"   class="btn" value="Laden">'
@@ -894,7 +1074,6 @@
       + '<input type="button" id="twOBtnPresets" class="btn" value="⚙ Presets" style="background:#7D510F;color:#fff;">'
       + '</div>'
 
-      // Filter-Bar
       + (hasPlan
         ? '<div class="ops-filter-bar">'
           + '🔍 <input type="text" id="twOFSearch" placeholder="Koord. / Dorf suchen…" style="width:155px" value="' + filterSearch + '">'
@@ -914,19 +1093,10 @@
           + '</div>'
         : '')
 
-      // Presets-Panel
       + '<div id="twOPresWrap" style="display:none"></div>'
-
-      // Bulk-Bar
       + buildBulkBar()
-
-      // Timeline
       + (hasPlan ? buildTimeline(ops) : '')
-
-      // Summary
       + '<div id="twOSumm"' + (!hasPlan ? ' style="display:none"' : '') + '></div>'
-
-      // Tabelle
       + '<div id="twOTbl">' + (hasPlan ? buildTable(slice, total) : '') + '</div>'
       + '</div>';
 
@@ -962,7 +1132,6 @@
     $('#twOTbl').html(buildTable(slice, total));
     bindTableEvents();
     updateBulkBar();
-    // Ticker-DOM neu anbinden (findet neue IDs automatisch)
   };
 
   const getSelectedIds = () =>
@@ -970,21 +1139,18 @@
 
   // ── EVENT-BINDUNG ──────────────────────────────────────────────────────────
   const bindTableEvents = () => {
-    // Sortierung
     $('.ops-sortable').off('click').on('click', function () {
       let k = $(this).data('sort');
       if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = 1; }
       rerender();
     });
 
-    // Pagination
     $('#twOpsPrev').off('click').on('click', () => { page = Math.max(0, page - 1); rerender(); });
     $('#twOpsNext').off('click').on('click', () => {
       page = Math.min(Math.ceil(getDisplayOps().length / CFG.PAGE_SIZE) - 1, page + 1);
       rerender();
     });
 
-    // Select-All (nur aktuelle Seite)
     $('#twOChkAll').off('change').on('change', function () {
       $('.ops-chk').prop('checked', $(this).prop('checked'));
       updateBulkBar();
@@ -1013,7 +1179,6 @@
       try { UI.SuccessMessage('Preset "' + name + '" gespeichert!'); } catch (e) {}
       $('#twOPresWrap').html(buildPresetsPanel());
       bindPresetEvents();
-      // Bulk-Dropdown aktualisieren
       $('#twOBulkPreset').html(
         '<option value="">— Preset auf Auswahl anwenden —</option>'
         + presets.map((p, i) => '<option value="' + i + '">' + p.name + '</option>').join('')
@@ -1033,22 +1198,56 @@
   const bindEvents = () => {
     bindTableEvents();
 
-    // Import-Toggle
     $('#twOImportToggle').off('click').on('click', function () {
       let hidden = $('#twOImportWrap').is(':hidden');
       $('#twOImportWrap').toggle();
       $(this).text(hidden ? '▲ Import ausblenden' : '▼ Neuen Export laden');
     });
 
-    // Laden
-    $('#twOBtnLoad').off('click').on('click', () => {
+    $('#twOBtnLoad').off('click').on('click', async () => {
       let raw = $('#twOTxt').val().trim();
-      if (!raw) { try { UI.ErrorMessage('Bitte Export einfügen.'); } catch (e) {} return; }
-      ops = parseExport(raw); page = 0; running = false; save(); updateFloater();
+      if (!raw) { try { UI.ErrorMessage('Bitte Export oder Link einfügen.'); } catch (e) {} return; }
+
+      // ── DS-Ultimate Link ───────────────────────────────────────────────────
+      if (isDsUltimateUrl(raw)) {
+        let $btn = $('#twOBtnLoad');
+        $btn.prop('disabled', true).val('⏳ Lade…');
+        $('#twOTxt').prop('disabled', true);
+        try {
+          let data = await fetchDsUltimatePlan(raw);
+          ops = parseJsonExport(JSON.stringify(data));
+          // Geparsten JSON zur Info in Textarea zeigen
+          $('#twOTxt').val(JSON.stringify(data, null, 2));
+        } catch (err) {
+          $btn.prop('disabled', false).val('Laden');
+          $('#twOTxt').prop('disabled', false);
+          let msg = String(err.message || err);
+          // CORS-Fehler → hilfreicher Hinweis
+          let hint = msg.toLowerCase().includes('cors') || msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network') || msg.toLowerCase().includes('failed')
+            ? '\n→ CORS blockiert: Öffne den Link im Browser, kopiere den JSON-Export und füge ihn hier ein.'
+            : '\n→ ' + msg;
+          try { UI.ErrorMessage('DS-Ultimate nicht erreichbar.' + hint.replace('\n→ ', ' ')); } catch (e) {}
+          $('#twOTxt').val(raw + '\n\n⚠ Fehler: ' + msg
+            + '\n\nFallback: Öffne https://ds-ultimate.de → Plan → Export (JSON) → hier einfügen.');
+          return;
+        }
+        $btn.prop('disabled', false).val('Laden');
+        $('#twOTxt').prop('disabled', false);
+        if (!ops || !ops.length) {
+          try { UI.ErrorMessage('Plan geladen, aber keine Ops erkannt.'); } catch (e) {} return;
+        }
+      } else {
+        // ── JSON oder Tab-Export ───────────────────────────────────────────
+        ops = parseExport(raw);
+        if (!ops || !ops.length) {
+          try { UI.ErrorMessage('Keine Ops erkannt — Format prüfen.'); } catch (e) {} return;
+        }
+      }
+
+      page = 0; running = false; save(); updateFloater();
       let { slice, total } = getPageOps();
       $('#twOTbl').html(buildTable(slice, total));
       bindTableEvents();
-      if (!ops.length) return;
       $('#twOBtnStart,#twOBtnSave').prop('disabled', false);
       $('#twOSumm').show(); updateSummary(ops);
       let supCnt = ops.filter(o => o.mode === 'support').length;
@@ -1060,7 +1259,6 @@
       } catch (e) {}
     });
 
-    // Neu laden
     $('#twOBtnNew').off('click').on('click', () => {
       if (running && !confirm('Laufenden Plan abbrechen und neuen laden?')) return;
       cancelAll(ops); wipePlan(); page = 0;
@@ -1068,7 +1266,6 @@
       Dialog.close(); openDialog();
     });
 
-    // Starten
     $('#twOBtnStart').off('click').on('click', () => {
       if (!ops.length) return;
       readFromTable(ops);
@@ -1080,14 +1277,12 @@
       running = true; alertFired = false; save(); updateFloater();
       $('#twOBtnStart').prop('disabled', true);
       $('#twOBtnCancel').prop('disabled', false);
-      let pCount = pend.length;
       try {
-        UI.SuccessMessage(pCount + ' Ops geplant — Fenster kann geschlossen werden! '
+        UI.SuccessMessage(pend.length + ' Ops geplant — Fenster kann geschlossen werden! '
           + '(Sound-Alarm ' + CFG.ALERT_SEC + 's vor erster Op)');
       } catch (e) {}
     });
 
-    // Abbrechen
     $('#twOBtnCancel').off('click').on('click', () => {
       if (!confirm('Alle ausstehenden Ops abbrechen?')) return;
       cancelAll(ops);
@@ -1096,20 +1291,17 @@
       updateSummary(ops); rerender();
     });
 
-    // Speichern
     $('#twOBtnSave').off('click').on('click', () => {
       readFromTable(ops); save();
       try { UI.SuccessMessage('Änderungen gespeichert!'); } catch (e) {}
     });
 
-    // Presets-Panel
     $('#twOBtnPresets').off('click').on('click', () => {
       let wrap = $('#twOPresWrap');
       if (wrap.is(':hidden')) { wrap.html(buildPresetsPanel()).show(); bindPresetEvents(); }
       else wrap.hide();
     });
 
-    // Filter
     let debounceFilter;
     $('#twOFSearch').off('input').on('input', function () {
       filterSearch = $(this).val(); clearTimeout(debounceFilter);
@@ -1123,7 +1315,6 @@
       rerender();
     });
 
-    // Typ-Umschalter pro Zeile
     $(document).off('click.opsMT').on('click.opsMT', '.ops-modetgl', function () {
       let op = ops.find(o => o.id === +$(this).data('op') && o.status === 'pending');
       if (!op) return;
@@ -1131,7 +1322,6 @@
       save(); rerender(); updateSummary(ops);
     });
 
-    // ✕ Überspringen
     $(document).off('click.opsDel').on('click.opsDel', '.ops-del', function () {
       let op = ops.find(o => o.id === +$(this).data('del') && o.status === 'pending');
       if (!op) return;
@@ -1142,7 +1332,6 @@
       save(); updateFloater(); updateSummary(ops); rerender();
     });
 
-    // ↺ Retry
     $(document).off('click.opsRetry').on('click.opsRetry', '.ops-retry', function () {
       let op = ops.find(o => o.id === +$(this).data('retry') && o.status === 'error');
       if (!op) return;
@@ -1151,7 +1340,6 @@
       save(); rerender(); updateSummary(ops);
     });
 
-    // ∞ Alle verfügbaren
     $(document).off('click.opsAB').on('click.opsAB',
       '.oab:not([disabled]):not([data-preunit]):not([data-preset-del])',
       function () {
@@ -1162,7 +1350,6 @@
           .val('').attr('placeholder', 'alle');
       });
 
-    // Input → Autosave (debounced, wirkt beim nächsten Senden)
     let debounce;
     $(document).off('input.opsIN change.opsIN')
       .on('input.opsIN change.opsIN', '.oti:not([disabled]), .oks:not([disabled])', () => {
@@ -1170,7 +1357,6 @@
         debounce = setTimeout(() => { readFromTable(ops); save(); }, 700);
       });
 
-    // ── Bulk-Aktionen ──
     $('#twOBulkAtk').off('click').on('click', () => {
       getSelectedIds().forEach(id => {
         let op = ops.find(o => o.id === id && o.status === 'pending');
@@ -1203,6 +1389,7 @@
     $('#twOBulkPreset').off('change').on('change', function () {
       let idx = +$(this).val();
       if (isNaN(idx) || !presets[idx]) return;
+      readFromTable(ops); // Manuelle Eingaben sichern
       let p = presets[idx];
       getSelectedIds().forEach(id => {
         let op = ops.find(o => o.id === id && o.status === 'pending');
@@ -1216,7 +1403,6 @@
   // ── BOOTSTRAP ──────────────────────────────────────────────────────────────
   window._twOpsInst = { open: openDialog };
 
-  // Tastenkürzel
   document.addEventListener('keydown', e => {
     if (e.ctrlKey && e.shiftKey && e.key === 'O') { e.preventDefault(); openDialog(); }
   });
@@ -1225,7 +1411,6 @@
   loadVillages();
   createFloater();
 
-  // Gespeicherten Plan laden
   const saved = loadSaved();
   if (saved && saved.length) {
     ops = saved.map(o => ({ ...o, timerId: null, _prewarmId: null }));
