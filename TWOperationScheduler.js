@@ -428,7 +428,7 @@
         let p = l.split(',');
         if (p.length < 4) return;
         let id   = +p[0];
-        let name = (p[1] || '').trim();
+        let name = (() => { try { return decodeURIComponent((p[1] || '').trim().replace(/\+/g, ' ')); } catch (e) { return (p[1] || '').trim(); } })();
         let x    = +(p[2] || 0);
         let y    = +(p[3] || 0);
         window._twOpsAllV[id] = { x, y, name };
@@ -712,30 +712,63 @@
   };
 
   // ── TABELLEN-RENDERING ─────────────────────────────────────────────────────
+
+  // Dorfnamen URL-dekodieren (Sicherheitsnetz falls noch encoded)
+  const dn = s => { try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch (e) { return s; } };
+
+  // Kompakte Truppen-Zusammenfassung als Chips
+  const troopChips = op => {
+    let parts = UNITS
+      .filter(u => op.troops[u.key] && op.troops[u.key] !== '0')
+      .map(u => {
+        let v = op.troops[u.key] === 'all' ? '∞' : op.troops[u.key];
+        return '<span class="tc">' + u.label + ':<b>' + v + '</b></span>';
+      });
+    return parts.length ? parts.join('') : '<span class="tc-empty">—</span>';
+  };
+
+  // Truppenzelle: kompakte Chips + aufklappbares Edit-Panel
   const troopCell = op => {
-    let dis = op.status !== 'pending' ? ' disabled' : '';
-    let h   = '<div class="otc">';
-    UNITS.forEach(u => {
-      let v  = op.troops[u.key] || '';
-      let dv = v === 'all' ? '' : v;
-      let ph = v === 'all' ? 'alle' : '0';
-      h += '<div class="ote"><label>' + u.label + '</label>'
-        + '<div style="display:flex;align-items:center">'
-        + '<input class="oti" type="text" data-op="' + op.id + '" data-unit="' + u.key + '"'
-        + ' value="' + dv + '" placeholder="' + ph + '"' + dis + '>'
-        + '<button class="oab" data-op="' + op.id + '" data-unit="' + u.key + '"' + dis + '>∞</button>'
-        + '</div></div>';
-    });
-    h += '</div>';
+    if (op.status !== 'pending')
+      return '<span class="ops-done-txt">' + op.statusText + '</span>';
+
     let opts = BUILDINGS.map(b =>
       '<option value="' + b.key + '"' + (op.building === b.key ? ' selected' : '') + '>' + b.label + '</option>'
     ).join('');
-    h += '<div class="okt">🪨 <select class="oks" data-op="' + op.id + '"' + dis + '>' + opts + '</select></div>';
-    return h;
+
+    let panel = '<div class="tpanel" id="tp' + op.id + '">'
+      + '<div class="otc">';
+    UNITS.forEach(u => {
+      let v  = op.troops[u.key] || '';
+      let dv = v === 'all' ? '' : v;
+      let ph = v === 'all' ? '∞' : '0';
+      panel += '<div class="ote"><label>' + u.label + '</label>'
+        + '<div class="ote-inp">'
+        + '<input class="oti" type="text" data-op="' + op.id + '" data-unit="' + u.key + '"'
+        + ' value="' + dv + '" placeholder="' + ph + '">'
+        + '<button class="oab" data-op="' + op.id + '" data-unit="' + u.key + '">∞</button>'
+        + '</div></div>';
+    });
+    panel += '</div>'
+      + '<div class="okt">🪨 <select class="oks" data-op="' + op.id + '">' + opts + '</select></div>'
+      + '</div>';
+
+    return '<div class="tsum">'
+      + '<span class="tsum-chips" id="tsc' + op.id + '">' + troopChips(op) + '</span>'
+      + '<button class="tc-tog" data-op="' + op.id + '" title="Truppen bearbeiten">✏</button>'
+      + (op.mode === 'support' ? '' : op.nobleGroup ? '' :
+         '<button class="ops-modetgl" data-op="' + op.id + '" title="Typ wechseln">→🛡</button>')
+      + '</div>'
+      + panel;
   };
 
   const fmtTs = ts => new Date(ts).toLocaleString('de-DE', {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+
+  // Nur Datum+Uhrzeit ohne Sekunden für Ankunft (spart Breite)
+  const fmtTsShort = ts => new Date(ts).toLocaleString('de-DE', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
   });
 
   const sortArrow = key => sortKey !== key ? '' : (sortDir === 1 ? ' ▲' : ' ▼');
@@ -745,69 +778,61 @@
     let pagination = totalPages > 1
       ? '<div class="ops-pages">'
         + '<button class="ops-pnav" id="twOpsPrev"' + (page === 0 ? ' disabled' : '') + '>◀</button>'
-        + ' Seite <b>' + (page + 1) + '</b> / ' + totalPages
-        + ' &nbsp;<button class="ops-pnav" id="twOpsNext"'
+        + ' Seite <b>' + (page + 1) + '</b>/' + totalPages
+        + ' <button class="ops-pnav" id="twOpsNext"'
         + (page >= totalPages - 1 ? ' disabled' : '') + '>▶</button>'
-        + ' <span style="font-size:10px;color:#888">' + slice.length + ' von ' + total + ' Ops</span>'
+        + ' <span class="ops-pcount">' + slice.length + '/' + total + '</span>'
         + '</div>'
       : '';
 
     if (!slice.length)
-      return pagination + '<p style="text-align:center;color:#c00;padding:10px">Keine Operationen gefunden.</p>';
+      return pagination + '<p class="ops-empty">Keine Operationen gefunden.</p>';
 
     let h = pagination
-      + '<table class="ops-t"><tr>'
-      + '<th><input type="checkbox" id="twOChkAll" title="Alle auf Seite wählen"></th>'
+      + '<table class="ops-t"><thead><tr>'
+      + '<th><input type="checkbox" id="twOChkAll"></th>'
       + '<th>#</th>'
       + '<th class="ops-sortable" data-sort="mode">Typ' + sortArrow('mode') + '</th>'
       + '<th class="ops-sortable" data-sort="originVillage">Herkunft' + sortArrow('originVillage') + '</th>'
       + '<th class="ops-sortable" data-sort="targetName">Ziel' + sortArrow('targetName') + '</th>'
-      + '<th>Truppen &amp; Kata-Ziel</th>'
+      + '<th>Truppen</th>'
       + '<th class="ops-sortable" data-sort="departTs">Abfahrt' + sortArrow('departTs') + '</th>'
       + '<th class="ops-sortable" data-sort="arriveTs">Ankunft' + sortArrow('arriveTs') + '</th>'
-      + '<th>Countdown</th><th>Status</th><th>–</th>'
-      + '</tr>';
+      + '<th>CD</th>'
+      + '<th>Status</th>'
+      + '<th></th>'
+      + '</tr></thead><tbody>';
 
     slice.forEach(op => {
-      let realIdx    = ops.indexOf(op) + 1;
-      let nobleClass = op.nobleGroup ? ' noble-train' : '';
+      let idx        = ops.indexOf(op) + 1;
+      let nc         = op.nobleGroup ? ' noble-train' : '';
       let modeIcon   = op.mode === 'support'
-        ? '<span class="badge-sup" title="Unterstützung">🛡</span>'
-        : (op.type === 'fake'
-          ? '<span class="badge-fake" title="Fake">F</span>'
-          : '<span class="badge-atk" title="Angriff">⚔</span>');
-      let nobleIcon  = op.nobleGroup ? ' <span class="badge-noble" title="Adels-Zug">👑</span>' : '';
-      let modeToggle = op.status === 'pending'
-        ? '<button class="ops-modetgl" data-op="' + op.id + '" title="Typ wechseln"'
-          + ' style="font-size:9px;padding:0 3px;border:1px solid #aaa;border-radius:2px;'
-          + 'background:#f4eed4;cursor:pointer;margin-left:2px;">'
-          + (op.mode === 'support' ? '→⚔' : '→🛡') + '</button>'
-        : '';
+        ? '<span title="Unterstützung">🛡</span>'
+        : (op.type === 'fake' ? '<span class="badge-fake" title="Fake">F</span>' : '<span title="Angriff">⚔</span>');
+      let nobleIcon  = op.nobleGroup ? '<span class="badge-noble" title="Adels-Zug"> 👑</span>' : '';
 
-      h += '<tr id="twOpsRow_' + op.id + '" class="' + op.status + nobleClass + '">'
-        + '<td><input type="checkbox" class="ops-chk" data-op="' + op.id + '"></td>'
-        + '<td>' + realIdx + '</td>'
-        + '<td>' + modeIcon + nobleIcon + modeToggle + '</td>'
-        + '<td style="text-align:left" title="' + op.originCoord + '">' + op.originVillage + '</td>'
-        + '<td style="text-align:left" title="' + op.targetCoord + '">' + op.targetName + '</td>'
-        + '<td>' + (op.status === 'pending'
-            ? troopCell(op)
-            : '<span style="color:#888;font-size:10px">' + op.statusText + '</span>') + '</td>'
-        + '<td style="white-space:nowrap">' + fmtTs(op.departTs) + '</td>'
-        + '<td style="white-space:nowrap">' + fmtTs(op.arriveTs) + '</td>'
-        + '<td><span id="twOpsCd_' + op.id + '" class="ops-cd">--</span></td>'
-        + '<td><span id="twOpsSt_' + op.id + '" class="ops-status-' + op.status + '">'
+      h += '<tr id="twOpsRow_' + op.id + '" class="' + op.status + nc + '">'
+        + '<td class="tc-chk"><input type="checkbox" class="ops-chk" data-op="' + op.id + '"></td>'
+        + '<td class="tc-idx">' + idx + '</td>'
+        + '<td class="tc-typ">' + modeIcon + nobleIcon + '</td>'
+        + '<td class="tc-vil" title="' + op.originCoord + '">' + dn(op.originVillage) + '</td>'
+        + '<td class="tc-vil" title="' + op.targetCoord + '">' + dn(op.targetName) + '</td>'
+        + '<td class="tc-troops">' + troopCell(op) + '</td>'
+        + '<td class="tc-time">' + fmtTs(op.departTs) + '</td>'
+        + '<td class="tc-time">' + fmtTsShort(op.arriveTs) + '</td>'
+        + '<td class="tc-cd"><span id="twOpsCd_' + op.id + '" class="ops-cd">--</span></td>'
+        + '<td class="tc-st"><span id="twOpsSt_' + op.id + '" class="ops-status-' + op.status + '">'
           + (op.statusText || 'Ausstehend') + '</span></td>'
-        + '<td style="white-space:nowrap">'
+        + '<td class="tc-act">'
         + (op.status === 'pending'
-          ? '<button class="ops-del" data-del="' + op.id + '" title="Überspringen">✕</button>'
-          : (op.status === 'error'
-            ? '<button class="ops-retry" data-retry="' + op.id + '" title="Erneut">↺</button>'
-            : ''))
+            ? '<button class="ops-del" data-del="' + op.id + '" title="Überspringen">✕</button>'
+            : (op.status === 'error'
+              ? '<button class="ops-retry" data-retry="' + op.id + '" title="Erneut">↺</button>'
+              : ''))
         + '</td></tr>';
     });
 
-    return h + '</table>' + pagination;
+    return h + '</tbody></table>' + pagination;
   };
 
   // ── TIMELINE ───────────────────────────────────────────────────────────────
@@ -980,59 +1005,144 @@
 
   // ── CSS ────────────────────────────────────────────────────────────────────
   const buildCSS = () => `<style>
-    #popup_box_TWOps{width:1080px!important;max-height:94vh;overflow-y:auto}
-    #twOB{font-family:Arial,sans-serif;font-size:11px}
-    #twOB h3{margin:0 0 5px;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-    .ops-badge{background:#2d7a36;color:#fff;border-radius:10px;padding:1px 9px;font-size:10px;font-weight:bold}
-    .ops-badge.warn{background:#c47a00;animation:opsPulse 1s ease-in-out infinite}
-    @keyframes opsPulse{0%,100%{opacity:1}50%{opacity:.55}}
-    #twOB textarea{width:100%;height:75px;font-size:10px;resize:vertical;box-sizing:border-box}
-    .ops-tb{margin:4px 0;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
-    #twOB table.ops-t{width:100%;border-collapse:collapse;margin-top:4px}
-    #twOB table.ops-t th{background:#7D510F;color:#fff;padding:3px 5px;text-align:center;
-      white-space:nowrap;cursor:default;font-size:11px}
-    #twOB table.ops-t th.ops-sortable{cursor:pointer}
-    #twOB table.ops-t th.ops-sortable:hover{background:#9a6322}
-    #twOB table.ops-t td{padding:2px 4px;border-bottom:1px solid #ccc;text-align:center;vertical-align:middle}
-    #twOB tr.pending  td{background:#f4eed4}
-    #twOB tr.sent     td{background:#d4edda}
-    #twOB tr.error    td{background:#f8d7da}
-    #twOB tr.missed   td{background:#fff3cd}
-    #twOB tr.imminent td{background:#ffe0b2;font-weight:bold}
-    #twOB tr.noble-train td{border-left:3px solid #9b59b6!important}
-    .ops-cd{font-weight:bold;color:#7D510F}
-    .ops-status-sent{color:#155724;font-weight:bold}
-    .ops-status-error{color:#721c24;font-weight:bold}
-    .ops-status-missed{color:#856404;font-weight:bold}
-    .ops-status-pending{color:#555}
-    .oti{width:30px;text-align:center;font-size:10px;padding:1px;border:1px solid #ccc;border-radius:2px}
-    .oti:disabled{background:#eee;color:#bbb;border-color:#ddd}
-    .oab{font-size:9px;padding:1px 2px;cursor:pointer;border:1px solid #aaa;border-radius:2px;background:#f4eed4}
-    .oab:disabled{color:#bbb;cursor:not-allowed}
-    .oks{font-size:10px;padding:1px;border-radius:2px;border:1px solid #aaa;background:#fff;cursor:pointer;max-width:125px}
-    .oks:disabled{background:#eee;color:#bbb}
-    #twOSumm{margin-top:4px;padding:4px 8px;background:#f4eed4;border:1px solid #7D510F;border-radius:3px}
-    .otc{display:flex;flex-wrap:wrap;gap:1px;justify-content:center}
-    .ote{display:flex;flex-direction:column;align-items:center;font-size:9px}
-    .ote label{color:#555;margin-bottom:1px}
-    .okt{margin-top:3px;font-size:9px;text-align:center}
-    .ops-del,.ops-retry{font-size:10px;color:#888;cursor:pointer;padding:1px 4px;
-      border:1px solid #ccc;border-radius:2px;background:#fff;line-height:1}
-    .ops-del:hover{background:#f8d7da;border-color:#f44}
-    .ops-retry{color:#155724;border-color:#28a745}
-    .ops-retry:hover{background:#d4edda}
-    .ops-pages{margin:3px 0;font-size:11px;text-align:center}
-    .ops-pnav{padding:2px 8px;cursor:pointer;border:1px solid #7D510F;border-radius:3px;background:#f4eed4;font-size:11px}
-    .ops-pnav:disabled{opacity:.4;cursor:not-allowed}
-    .badge-atk{color:#c00;font-weight:bold}
-    .badge-fake{color:#888;font-weight:bold;font-size:10px}
-    .badge-noble{font-size:10px}
-    .ops-filter-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;
-      margin:3px 0;padding:4px 6px;background:#eee;border-radius:3px;font-size:10px}
-    .ops-filter-bar select,.ops-filter-bar input[type="text"]{font-size:10px;padding:2px 4px;border:1px solid #ccc;border-radius:2px}
+    /* ── Layout ── */
+    #popup_box_TWOps{width:1120px!important;max-height:95vh;overflow-y:auto}
+    #twOB{font:12px/1.35 Arial,sans-serif;color:#1a1209}
+
+    /* ── Header ── */
+    #twOB h3{margin:0 0 5px;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+      padding-bottom:5px;border-bottom:2px solid #c8a060}
+    .ops-badge{background:#2a6e30;color:#fff;border-radius:10px;padding:1px 10px;
+      font-size:10px;font-weight:bold;letter-spacing:.3px}
+    .ops-badge.warn{background:#b86e00;animation:opsPulse .9s ease-in-out infinite}
+    @keyframes opsPulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+    /* ── Import ── */
+    #twOB textarea{width:100%;height:62px;font-size:10px;resize:vertical;box-sizing:border-box;
+      border:1px solid #c8a060;border-radius:3px;padding:4px 6px;font-family:monospace}
     #twOImportWrap{margin-bottom:3px}
-    #twOImportToggle{font-size:10px;color:#7D510F;cursor:pointer;text-decoration:underline;display:inline-block;margin-top:1px}
-    .ops-hint{font-size:9px;color:#888;margin:2px 0 0}
+    #twOImportToggle{font-size:10px;color:#7D510F;cursor:pointer;text-decoration:underline;
+      display:inline-block;margin-top:2px}
+    .ops-hint{font-size:9px;color:#999;margin:1px 0 0}
+
+    /* ── Toolbar ── */
+    .ops-tb{margin:5px 0 4px;display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+
+    /* ── Filter-Bar ── */
+    .ops-filter-bar{display:flex;gap:5px;align-items:center;flex-wrap:wrap;
+      margin:3px 0;padding:4px 8px;background:#f0e8d4;border:1px solid #d4b882;
+      border-radius:4px;font-size:11px}
+    .ops-filter-bar select,.ops-filter-bar input[type="text"]{font-size:10px;
+      padding:2px 5px;border:1px solid #c8a060;border-radius:3px}
+
+    /* ── Summary ── */
+    #twOSumm{margin:4px 0;padding:4px 10px;background:#f4eed4;border:1px solid #c8a060;
+      border-radius:4px;font-size:11px}
+
+    /* ── Table ── */
+    .ops-t{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}
+    .ops-t thead th{background:linear-gradient(180deg,#8a5210 0%,#6a3a08 100%);
+      color:#f8e8c0;padding:5px 6px;white-space:nowrap;border:1px solid #4a2a04;
+      border-bottom:2px solid #3a1e02;font-size:11px}
+    .ops-t thead th.ops-sortable{cursor:pointer}
+    .ops-t thead th.ops-sortable:hover{background:linear-gradient(180deg,#9e6218 0%,#7a4a10 100%)}
+    .ops-t tbody td{padding:3px 6px;border-bottom:1px solid #e0d4b8;vertical-align:middle}
+    .ops-t tbody tr:last-child td{border-bottom:none}
+
+    /* ── Column widths ── */
+    .tc-chk{width:22px;text-align:center}
+    .tc-idx{width:24px;text-align:center;color:#888;font-size:10px}
+    .tc-typ{width:36px;text-align:center}
+    .tc-vil{text-align:left;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tc-troops{min-width:180px}
+    .tc-time{white-space:nowrap;font-size:10px;color:#333;text-align:center}
+    .tc-cd{width:72px;text-align:center}
+    .tc-st{width:82px;text-align:center}
+    .tc-act{width:28px;text-align:center}
+
+    /* ── Row states ── */
+    .ops-t tr.pending  td{background:#faf4e0}
+    .ops-t tr.sent     td{background:#e8f5ea}
+    .ops-t tr.error    td{background:#fce8e8}
+    .ops-t tr.missed   td{background:#fdf5e0}
+    .ops-t tr.imminent td{background:#fff0cc;font-weight:bold}
+    .ops-t tr.noble-train td{border-left:3px solid #8a40b8!important}
+    .ops-t tbody tr:hover td{filter:brightness(.96)}
+
+    /* ── Troop chips (summary) ── */
+    .tsum{display:flex;align-items:center;gap:3px;flex-wrap:wrap;line-height:1.2}
+    .tsum-chips{display:flex;flex-wrap:wrap;gap:2px;flex:1}
+    .tc{display:inline-block;background:#e6d9b8;border:1px solid #c8a870;border-radius:3px;
+      padding:1px 5px;font-size:10px;white-space:nowrap;color:#3a2800}
+    .tc b{color:#6a3a00}
+    .tc-empty{font-size:10px;color:#bbb;font-style:italic}
+    .ops-done-txt{font-size:10px;color:#999;font-style:italic}
+
+    /* ── Troop edit toggle ── */
+    .tc-tog{font-size:10px;padding:1px 5px;cursor:pointer;border:1px solid #b8a060;
+      border-radius:3px;background:#f0e4c0;color:#5a3800;flex-shrink:0}
+    .tc-tog:hover{background:#e0d0a0}
+    .tc-tog.open{background:#c8e0c8;border-color:#4a8040;color:#1a4010}
+
+    /* ── Troop edit panel ── */
+    .tpanel{display:none;margin-top:5px;padding:6px;background:#fdf8f0;
+      border:1px solid #d4b882;border-radius:4px}
+    .otc{display:flex;flex-wrap:wrap;gap:4px}
+    .ote{display:flex;flex-direction:column;align-items:center;font-size:9px;color:#666}
+    .ote label{margin-bottom:2px;font-size:9px;color:#888}
+    .ote-inp{display:flex;align-items:center;gap:1px}
+    .oti{width:34px;text-align:center;font-size:10px;padding:2px 1px;
+      border:1px solid #c8b080;border-radius:2px;background:#fff}
+    .oti:disabled{background:#f0ead8;color:#bbb;border-color:#ddd}
+    .oab{font-size:9px;padding:2px 3px;cursor:pointer;border:1px solid #b8a060;
+      border-radius:2px;background:#f0e4c0;color:#5a3800}
+    .oab:hover{background:#e0d0a0}
+    .oab:disabled{color:#ccc;cursor:not-allowed;background:#f5f0e8}
+    .okt{margin-top:5px;font-size:10px;display:flex;align-items:center;gap:5px}
+    .oks{font-size:10px;padding:2px 4px;border-radius:3px;border:1px solid #c8a060;
+      background:#fff;cursor:pointer;max-width:145px}
+    .oks:disabled{background:#f0ead8;color:#bbb}
+
+    /* ── Kata-Ziel preset panel ── */
+    .ops-pres-hdr{font-size:11px;font-weight:bold;margin-bottom:4px}
+
+    /* ── Countdown & Status ── */
+    .ops-cd{font-weight:bold;color:#b06000;font-size:11px;font-variant-numeric:tabular-nums}
+    .ops-status-sent  {color:#155724;font-weight:bold}
+    .ops-status-error {color:#8b1a1a;font-weight:bold}
+    .ops-status-missed{color:#7a5c00;font-weight:bold}
+    .ops-status-pending{color:#555}
+
+    /* ── Mode / type badges ── */
+    .badge-fake{font-size:9px;font-weight:bold;color:#888;border:1px solid #ccc;
+      border-radius:2px;padding:0 3px;background:#f5f5f5}
+    .badge-noble{font-size:11px}
+    .ops-modetgl{font-size:9px;padding:1px 4px;border:1px solid #b0a070;border-radius:2px;
+      background:#f0e4c0;cursor:pointer;color:#5a3800}
+
+    /* ── Row action buttons ── */
+    .ops-del,.ops-retry{font-size:11px;cursor:pointer;padding:2px 5px;
+      border-radius:3px;border:1px solid #ccc;background:#fff;color:#888;line-height:1}
+    .ops-del:hover{background:#fdd;border-color:#e44;color:#c00}
+    .ops-retry{color:#155724;border-color:#4a8a50;background:#f0faf0}
+    .ops-retry:hover{background:#d0f0d8}
+
+    /* ── Pagination ── */
+    .ops-pages{margin:4px 0;font-size:11px;text-align:center;color:#555}
+    .ops-pnav{padding:2px 8px;cursor:pointer;border:1px solid #9a6020;
+      border-radius:3px;background:#f0e4c0;font-size:11px;color:#5a3800}
+    .ops-pnav:hover{background:#e0d0a0}
+    .ops-pnav:disabled{opacity:.35;cursor:not-allowed}
+    .ops-pcount{font-size:10px;color:#aaa;margin-left:6px}
+    .ops-empty{text-align:center;color:#c00;padding:12px;font-size:12px}
+
+    /* ── Bulk-Bar ── */
+    #twOBulk{margin:4px 0;padding:5px 8px;background:#fff3e0;border:1px solid #d07020;
+      border-radius:4px;display:none;align-items:center;gap:5px;flex-wrap:wrap}
+
+    /* ── Timeline ── */
+    #twOTimeline{margin:4px 0;padding:5px 10px;background:#fffbe6;
+      border:1px solid #f0c040;border-radius:4px;font-size:11px}
   </style>`;
 
   // ── DIALOG ─────────────────────────────────────────────────────────────────
@@ -1156,6 +1266,38 @@
       updateBulkBar();
     });
     $(document).off('change.opsChk').on('change.opsChk', '.ops-chk', updateBulkBar);
+
+    // Truppenzelle auf-/zuklappen
+    $(document).off('click.tcTog').on('click.tcTog', '.tc-tog', function () {
+      let oid    = +$(this).data('op');
+      let $panel = $('#tp' + oid);
+      let $btn   = $(this);
+      let open   = $panel.is(':visible');
+
+      if (open) {
+        // Beim Schließen: Inputs lesen + Chips aktualisieren
+        let op = ops.find(o => o.id === oid);
+        if (op) {
+          UNITS.forEach(u => {
+            let inp = document.querySelector('input.oti[data-op="' + oid + '"][data-unit="' + u.key + '"]');
+            if (!inp) return;
+            let v = inp.value.trim();
+            if (!v && inp.placeholder === '∞') op.troops[u.key] = 'all';
+            else if (!v || v === '0') delete op.troops[u.key];
+            else op.troops[u.key] = v;
+          });
+          let ks = document.querySelector('.oks[data-op="' + oid + '"]');
+          if (ks) op.building = ks.value;
+          $('#tsc' + oid).html(troopChips(op));
+          save();
+        }
+        $panel.slideUp(120);
+        $btn.text('✏').removeClass('open');
+      } else {
+        $panel.slideDown(120);
+        $btn.text('✓').addClass('open');
+      }
+    });
   };
 
   const bindPresetEvents = () => {
