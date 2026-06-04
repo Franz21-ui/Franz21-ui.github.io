@@ -378,7 +378,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       '</div>'
     );
 
-    const getDelay = () => Math.floor(Math.random() * 100) + 150; // 150–500ms
+    const getDelay = () => Math.floor(Math.random() * 100) + 50; // 150–500ms
 
     const sendNext = function () {
       if (autoPaused) return;
