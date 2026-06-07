@@ -1,4 +1,4 @@
-// FarmGod AutoSend — Version 2.0
+// FarmGod AutoSend — Version 2.1 (Bug-Fix Release)
 // Ursprung: Warre / nl.tribalwars@coma.innogames.de
 // Optimiert & erweitert von Perplexity AI
 //
@@ -233,29 +233,23 @@ window.FarmGod.Library = (function () {
       let $firstHtml = $(html);
       processorFn($firstHtml);
 
-      // Anzahl weiterer Seiten aus erster Seite bestimmen
+      // [BUG-B FIX] Seitenanzahl aus $firstHtml lesen, NICHT aus dem Live-DOM
+      // [BUG-E FIX] navSelect: .length - 1 (Seiten sind 0-indiziert)
       let navSelect = $firstHtml.find('.paged-nav-item').first().closest('td').find('select').first();
       let totalPages;
       if ($firstHtml.find('#am_widget_Farm').length > 0) {
-        totalPages = parseInt($('#plunder_list_nav').first()
+        // Farm-Assistent: Seitenanzahl aus der geparsten HTML-Seite lesen
+        totalPages = parseInt($firstHtml.find('#plunder_list_nav')
           .find('a.paged-nav-item, strong.paged-nav-item').last().text().replace(/\D/g, '')) || 1;
       } else if (navSelect.length > 0) {
-        totalPages = navSelect.find('option').length;
+        // Übersichtsseiten: Optionen = Seiten, 0-indiziert → -1
+        totalPages = navSelect.find('option').length - 1;
       } else {
         totalPages = $firstHtml.find('.paged-nav-item').not('[href*="page=-1"]').length + 1;
       }
 
       if (totalPages <= 1) return Promise.resolve();
 
-      // Alle weiteren Seiten auf einmal parallel fetchen
+      // Alle weiteren Seiten parallel fetchen
       let requests = [];
-      for (let p = startPage + 1; p < totalPages; p++) {
-        requests.push(
-          twLib.ajax({ url: url + pageText + p }).then((h) => processorFn($(h)))
-        );
-      }
-      return Promise.all(requests);
-    });
-  };
-
-  // ── Helpers ───────
+      
