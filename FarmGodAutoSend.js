@@ -363,10 +363,7 @@ window.FarmGod.Main = (function (Library, Translation) {
   let sessionStats = { sent: 0, errors: 0, runs: 0, villages: {} };
   // ── END STATE ──────────────────────────────────────────────────────────────
 
-  // ── FIX: skipUnits moved to module scope so both villagesProcessor
-  //         and farmProcessor use the same filter, keeping arrays aligned.
   const skipUnits = ['ram', 'catapult', 'knight', 'snob', 'militia'];
-  // ── END FIX ────────────────────────────────────────────────────────────────
 
   // ── AUTO-SEND ──────────────────────────────────────────────────────────────
   const autoSend = function (onSuccess, onError, onComplete) {
@@ -378,7 +375,8 @@ window.FarmGod.Main = (function (Library, Translation) {
       '</div>'
     );
 
-    const getDelay = () => Math.floor(Math.random() * 100) + 50; // 150–500ms
+    // Konstante Abschickzeit von 200 ms plus ein kleiner Random-Buffer (0–50 ms) gegen Bot-Detection
+    const getDelay = () => 200 + Math.floor(Math.random() * 50);
 
     const sendNext = function () {
       if (autoPaused) return;
@@ -391,7 +389,7 @@ window.FarmGod.Main = (function (Library, Translation) {
       }
 
       if (farmBusy) {
-        setTimeout(sendNext, 100);
+        setTimeout(sendNext, 50);
         return;
       }
 
@@ -431,8 +429,6 @@ window.FarmGod.Main = (function (Library, Translation) {
     $(statsHtml).addClass('farmGodStats').insertBefore('.farmGodContent');
 
     clearInterval(countdownTimer);
-    // FIX countdown: anchor to Date.now() so the displayed seconds stay
-    // in sync with the actual setTimeout delay passed from runFarmCycle.
     let restartEnd = Date.now() + restartInSec * 1000;
     countdownTimer = setInterval(function () {
       let remaining = Math.round((restartEnd - Date.now()) / 1000);
@@ -442,13 +438,11 @@ window.FarmGod.Main = (function (Library, Translation) {
       } else {
         $('#farmGodCountdown').text('Neustart in ' + remaining + 's');
       }
-    }, 500); // poll at 500 ms so the display never lags more than half a second
+    }, 500);
   };
   // ── END STATS ──────────────────────────────────────────────────────────────
 
   // ── AUTO-RESTART ───────────────────────────────────────────────────────────
-  // FIX countdown: accepts delayMs directly instead of re-rolling Math.random(),
-  // so the actual restart fires at exactly the time shown in the countdown.
   const scheduleRestart = function (delayMs, runOptions) {
     autoRestartTimer = setTimeout(function () {
       $('.farmGodStats').remove();
@@ -490,10 +484,6 @@ window.FarmGod.Main = (function (Library, Translation) {
       bindSendCallbacks(onFarmSuccess, onFarmError);
 
       autoSend(onFarmSuccess, onFarmError, function () {
-        // FIX countdown: compute the delay ONCE and pass the same value to
-        // both showStats (display) and scheduleRestart (actual timer).
-        // Previously each function called Math.random() independently,
-        // so the countdown showed a different duration than the real delay.
         let restartSec = Math.floor(
           Math.random() * (opts.restartMax - opts.restartMin + 1) + opts.restartMin
         ) * 60;
@@ -751,8 +741,6 @@ window.FarmGod.Main = (function (Library, Translation) {
               }
             });
 
-            // FIX troops: use module-level skipUnits so the filter matches
-            // the one applied to templateUnits in farmProcessor.
             const filteredUnits = units.filter(
               (_, index) => skipUnits.indexOf(game_data.units[index]) === -1
             );
@@ -770,7 +758,6 @@ window.FarmGod.Main = (function (Library, Translation) {
           .each((i, el) => {
             let $el = $(el);
             let $qel = $el.find('.quickedit-label').first();
-            // FIX troops: use module-level skipUnits (same reason as above).
             let units = $el
               .find('.unit-item')
               .filter((index) => skipUnits.indexOf(game_data.units[index]) === -1)
@@ -822,12 +809,6 @@ window.FarmGod.Main = (function (Library, Translation) {
               .attr('class')
               .match(/farm_icon_(.*)\s/)[1];
 
-            // FIX troops: filter out skipUnits from templateUnits so its
-            // length and order match data.villages[x].units exactly.
-            // Previously templateUnits included all unit types (including
-            // ram/catapult/knight/snob/militia) while villageUnits did not,
-            // causing subtractArrays to compare wrong indices and never
-            // consume troops correctly — leaving units "left over" every run.
             let $inputs = $el.find('input[type="text"], input[type="number"]');
             let templateUnits = $inputs
               .filter((index) => skipUnits.indexOf(game_data.units[index]) === -1)
