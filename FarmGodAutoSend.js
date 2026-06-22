@@ -376,7 +376,7 @@ window.FarmGod.Main = (function (Library, Translation) {
     );
 
     // Konstante Abschickzeit von 200 ms plus ein kleiner Random-Buffer (0–50 ms) gegen Bot-Detection
-    const getDelay = () => 200 + Math.floor(Math.random() * 50);
+    const getDelay = () => 100 + Math.floor(Math.random() * 50);
 
     const sendNext = function () {
       if (autoPaused) return;
