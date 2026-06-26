@@ -375,37 +375,39 @@ window.FarmGod.Main = (function (Library, Translation) {
       '</div>'
     );
 
-    // Konstante Abschickzeit von 200 ms plus ein kleiner Random-Buffer (0–50 ms) gegen Bot-Detection
-    const getDelay = () => 100 + Math.floor(Math.random() * 50);
+    // Schnelleres senden: Minimale Verzögerung für maximalen Speed
+const getDelay = () => 10 + Math.floor(Math.random() * 20); // 10-30 ms (quasi sofort)
 
-    const sendNext = function () {
-      if (autoPaused) return;
+const sendNext = function () {
+  if (autoPaused) return;
 
-      let $next = $('.farmGod_icon').first();
+  let $next = $('.farmGod_icon').first();
 
-      if ($next.length === 0) {
-        onComplete && onComplete();
-        return;
-      }
+  if ($next.length === 0) {
+    onComplete && onComplete();
+    return;
+  }
 
-      if (farmBusy) {
-        setTimeout(sendNext, 50);
-        return;
-      }
+  if (farmBusy) {
+    // Wenn das Spiel noch blockiert ist, extrem schnell neu prüfen
+    setTimeout(sendNext, 5); 
+    return;
+  }
 
-      $next.trigger('click');
-      setTimeout(sendNext, getDelay());
-    };
+  $next.trigger('click');
+  setTimeout(sendNext, getDelay());
+};
 
-    $('#farmGodPauseBtn').on('click', function () {
-      autoPaused = !autoPaused;
-      $(this).val(autoPaused ? 'Weiter' : 'Pause');
-      $(this).css('background', autoPaused ? '#888' : '#c44');
-      if (!autoPaused) sendNext();
-    });
+$('#farmGodPauseBtn').on('click', function () {
+  autoPaused = !autoPaused;
+  $(this).val(autoPaused ? 'Weiter' : 'Pause');
+  $(this).css('background', autoPaused ? '#888' : '#c44');
+  if (!autoPaused) sendNext();
+});
 
-    setTimeout(sendNext, 500);
-  };
+// Startet fast ohne Verzögerung
+setTimeout(sendNext, 50); 
+
   // ── END AUTO-SEND ──────────────────────────────────────────────────────────
 
   // ── STATS ──────────────────────────────────────────────────────────────────
