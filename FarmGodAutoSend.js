@@ -375,8 +375,8 @@ window.FarmGod.Main = (function (Library, Translation) {
       '</div>'
     );
 
-    Schnelleres senden: // Konstante Abschickzeit von 200 ms plus ein kleiner Random-Buffer (0–50 ms) gegen Bot-Detection
-    const getDelay = () => 100 + Math.floor(Math.random() * 50);
+    // Konstante Abschickzeit von 200 ms plus ein kleiner Random-Buffer (0–50 ms) gegen Bot-Detection
+    const getDelay = () => 200 + Math.floor(Math.random() * 50);
 
     const sendNext = function () {
       if (autoPaused) return;
@@ -406,10 +406,6 @@ window.FarmGod.Main = (function (Library, Translation) {
 
     setTimeout(sendNext, 500);
   };
-
-// Startet fast ohne Verzögerung
-setTimeout(sendNext, 50); 
-
   // ── END AUTO-SEND ──────────────────────────────────────────────────────────
 
   // ── STATS ──────────────────────────────────────────────────────────────────
